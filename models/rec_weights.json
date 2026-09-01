@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "oof_auc": 0.57174,
+  "C_best": 0.001,
+  "n_samples": 200000,
+  "pos_rate": 0.5,
+  "scale_max": 30,
+  "weights": {
+    "wide_cpr": {
+      "points": -5,
+      "coef": 0.09053,
+      "ci_lo": 25,
+      "ci_hi": 30,
+      "boot_std": 0.00669,
+      "domain_override": "range-bound tendency; raw +30 confounded by volatility"
+    },
+    "ema_opposed": {
+      "points": -28,
+      "coef": -0.08377,
+      "ci_lo": -30,
+      "ci_hi": -20,
+      "boot_std": 0.00629
+    },
+    "not_extended": {
+      "points": -23,
+      "coef": -0.07062,
+      "ci_lo": -23,
+      "ci_hi": -18,
+      "boot_std": 0.00291
+    },
+    "atr_rank_high": {
+      "points": 23,
+      "coef": 0.07002,
+      "ci_lo": 19,
+      "ci_hi": 23,
+      "boot_std": 0.00411
+    },
+    "vol_surge": {
+      "points": 23,
+      "coef": 0.06824,
+      "ci_lo": 18,
+      "ci_hi": 22,
+      "boot_std": 0.00488
+    },
+    "extended": {
+      "points": 22,
+      "coef": 0.06702,
+      "ci_lo": 19,
+      "ci_hi": 20,
+      "boot_std": 0.00275
+    },
+    "near_hi52": {
+      "points": -16,
+      "coef": -0.04793,
+      "ci_lo": -18,
+      "ci_hi": -11,
+      "boot_std": 0.00489
+    },
+    "ema_aligned": {
+      "points": -14,
+      "coef": -0.04265,
+      "ci_lo": -17,
+      "ci_hi": -9,
+      "boot_std": 0.00651
+    },
+    "vix_low": {
+      "points": -14,
+      "coef": -0.04249,
+      "ci_lo": -17,
+      "ci_hi": -10,
+      "boot_std": 0.00448
+    },
+    "narrow_cpr": {
+      "points": 15,
+      "coef": -0.03794,
+      "ci_lo": -15,
+      "ci_hi": -7,
+      "boot_std": 0.00586,
+      "domain_override": "explosive breakout (Gomathi Shankar CPR alternation principle); raw -13 confounded by mixed-direction signals"
+    },
+    "near_lo52": {
+      "points": -10,
+      "coef": -0.02891,
+      "ci_lo": -12,
+      "ci_hi": -6,
+      "boot_std": 0.00439
+    },
+    "mom_opposed": {
+      "points": 8,
+      "coef": 0.024,
+      "ci_lo": 3,
+      "ci_hi": 13,
+      "boot_std": 0.01041
+    },
+    "vwap_opposed": {
+      "points": 8,
+      "coef": 0.02328,
+      "ci_lo": 6,
+      "ci_hi": 8,
+      "boot_std": 0.00266
+    },
+    "vwap_aligned": {
+      "points": -8,
+      "coef": -0.02328,
+      "ci_lo": -9,
+      "ci_hi": -5,
+      "boot_std": 0.00266
+    },
+    "rules_2": {
+      "points": 7,
+      "coef": 0.02102,
+      "ci_lo": 5,
+      "ci_hi": 7,
+      "boot_std": 0.00242
+    },
+    "rules_3plus": {
+      "points": -7,
+      "coef": -0.02102,
+      "ci_lo": -8,
+      "ci_hi": -5,
+      "boot_std": 0.00242
+    },
+    "monday": {
+      "points": 5,
+      "coef": 0.01617,
+      "ci_lo": 2,
+      "ci_hi": 7,
+      "boot_std": 0.00448
+    },
+    "vix_high": {
+      "points": 5,
+      "coef": 0.0142,
+      "ci_lo": 1,
+      "ci_hi": 7,
+      "boot_std": 0.00514
+    },
+    "mom_aligned": {
+      "points": 5,
+      "coef": 0.0136,
+      "ci_lo": 0,
+      "ci_hi": 10,
+      "boot_std": 0.01041
+    },
+    "high_vol_rank": {
+      "points": -4,
+      "coef": -0.01126,
+      "ci_lo": -7,
+      "ci_hi": 0,
+      "boot_std": 0.00564
+    },
+    "rsi_extreme": {
+      "points": 2,
+      "coef": 0.00655,
+      "ci_lo": -1,
+      "ci_hi": 5,
+      "boot_std": 0.0048
+    },
+    "low_vol_rank": {
+      "points": 2,
+      "coef": 0.00654,
+      "ci_lo": -2,
+      "ci_hi": 4,
+      "boot_std": 0.00497
+    },
+    "friday": {
+      "points": 2,
+      "coef": 0.00609,
+      "ci_lo": -1,
+      "ci_hi": 4,
+      "boot_std": 0.00439
+    },
+    "rsi_favourable": {
+      "points": 2,
+      "coef": 0.00604,
+      "ci_lo": -1,
+      "ci_hi": 4,
+      "boot_std": 0.00454
+    },
+    "sg_vel_pos": {
+      "points": 1,
+      "coef": 0.00376,
+      "ci_lo": -1,
+      "ci_hi": 4,
+      "boot_std": 0.00516
+    },
+    "sector_rs_pos": {
+      "points": -1,
+      "coef": -0.00282,
+      "ci_lo": -2,
+      "ci_hi": 0,
+      "boot_std": 0.00125
+    },
+    "market_rs_pos": {
+      "points": -1,
+      "coef": -0.00282,
+      "ci_lo": -2,
+      "ci_hi": 0,
+      "boot_std": 0.00125
+    },
+    "market_rs_neg": {
+      "points": 1,
+      "coef": 0.00282,
+      "ci_lo": 0,
+      "ci_hi": 1,
+      "boot_std": 0.00125
+    },
+    "sector_rs_neg": {
+      "points": 1,
+      "coef": 0.00282,
+      "ci_lo": 0,
+      "ci_hi": 1,
+      "boot_std": 0.00125
+    },
+    "mild_ext": {
+      "points": 0,
+      "coef": -0.00095,
+      "ci_lo": -3,
+      "ci_hi": 2,
+      "boot_std": 0.00341
+    },
+    "high_delivery": {
+      "points": 0,
+      "coef": 0.0,
+      "ci_lo": 0,
+      "ci_hi": 0,
+      "boot_std": 0.0
+    },
+    "rules_1": {
+      "points": 0,
+      "coef": 0.0,
+      "ci_lo": 0,
+      "ci_hi": 0,
+      "boot_std": 0.0
+    },
+    "pcr_bearish": {
+      "points": 0,
+      "coef": 0.0,
+      "ci_lo": 0,
+      "ci_hi": 0,
+      "boot_std": 0.0
+    }
+  }
+}

@@ -1543,6 +1543,61 @@ const $ = id => document.getElementById(id);
 const fmt = (v, d=2) => v != null ? v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }) : '–';
 const fmtPct = v => v != null ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '–';
 
+// ─── REC ENGINE WEIGHTS (loaded from /rec_weights.json) ──────────────────────
+let _REC_W = null;  // null until loaded
+let _REC_W_LOADED = false;
+const _REC_W_DEFAULTS = {
+  // Empirical defaults from logistic regression (200k signals, OOF AUC 0.572)
+  // Positive = increases P(hit_t1), Negative = decreases it
+  // CPR width — DOMAIN OVERRIDE: narrow CPR = explosive breakout (Gomathi Shankar / CPR theory)
+  // Data showed wide_cpr +30 but that is confounded: wide CPR stocks are volatile so targets
+  // get hit via intraday noise, not because the SIGNAL is better.
+  // Narrow CPR = tight prior-day range → alternation principle → trending/explosive day ahead.
+  // When price breaks above TC of a narrow CPR there is almost no resistance in the CPR zone.
+  wide_cpr:       -5,  // range-bound tendency, noisy intraday environment
+  narrow_cpr:    +15,  // explosive breakout potential — CPR alternation principle
+  extended:      +22,  // momentum stocks keep moving toward targets
+  not_extended:  -23,  // calm stocks don't move enough
+  mild_ext:        0,
+  atr_high:      +23,  // high ATR = can reach targets
+  vol_surge:     +23,  // volume surge = conviction (ML stackScore proxy)
+  vol_mid:       +10,
+  vwap_aligned:   -8,  // already past VWAP = less room to T1
+  vwap_opposed:   +8,  // not yet at VWAP = more room to run
+  ema_aligned:   -14,  // trend-following hurts CPR setups
+  ema_opposed:   -28,  // price hard against trend = risk
+  rules_3plus:    -7,  // over-filtered entries miss moves
+  rules_2:        +7,
+  rules_1:         0,
+  vix_low:       -14,  // low VIX = less volatility = less likely to hit
+  vix_high:       +5,
+  mom_aligned:    +5,
+  mom_opposed:    +8,  // slight mean-reversion edge
+};
+
+async function loadRecWeights() {
+  if (_REC_W_LOADED) return;
+  try {
+    const r = await fetch('/rec_weights.json');
+    if (r.ok) {
+      const d = await r.json();
+      const w = {};
+      if (d.weights) {
+        Object.keys(d.weights).forEach(k => { w[k] = d.weights[k].points; });
+      }
+      _REC_W = w;
+      console.log(`[Rec] Weights loaded from rec_weights.json (OOF AUC ${d.oof_auc})`);
+    }
+  } catch(e) { /* use defaults */ }
+  _REC_W_LOADED = true;
+}
+
+function _rw(key) {
+  // Resolve weight: JSON first, then defaults
+  if (_REC_W && _REC_W[key] !== undefined) return _REC_W[key];
+  return _REC_W_DEFAULTS[key] ?? 0;
+}
+
 // ─── BUY/SELL RECOMMENDATION ENGINE ──────────────────────────────────────────
 function computeRecommendation(stock) {
   const cpr   = stock.cpr   || {};
@@ -1566,54 +1621,87 @@ function computeRecommendation(stock) {
              atr:atr_proxy, why:['Price inside CPR — no directional bias'] };
   }
 
-  const regime = ml.regime || '';
-  const regimeAligned = (direction==='LONG'  && regime==='Bull-Trend') ||
-                        (direction==='SHORT' && regime==='Bear-Trend');
-  const regimeOpposed = (direction==='LONG'  && (regime==='Bear-Trend'||regime==='High-Vol-Panic')) ||
-                        (direction==='SHORT' && regime==='Bull-Trend');
+  // ── CPR width ─────────────────────────────────────────────────────────────
+  const narrowThresh = typeof State!=='undefined' ? (State.narrowThreshold||0.5) : 0.5;
+  const isNarrow     = cpr.widthPct < narrowThresh;
+  const isWide       = cpr.widthPct > narrowThresh * 1.5;
 
-  const vwap = stock.vwap || 0;
-  const vwapAligned = vwap > 0 && ((direction==='LONG' && price>vwap)||(direction==='SHORT' && price<vwap));
-  const vwapOpposed = vwap > 0 && ((direction==='LONG' && price<vwap)||(direction==='SHORT' && price>vwap));
-
-  const posClass = (stock.pricePosition || '').toUpperCase();
-  const posMatch  = (direction==='LONG'  && posClass==='ABOVE_TC') ||
-                    (direction==='SHORT' && posClass==='BELOW_BC');
-
-  const isNarrow   = cpr.widthPct < (typeof State!=='undefined' ? (State.narrowThreshold||0.5) : 0.5);
+  // ── Momentum / extension ──────────────────────────────────────────────────
   const chg        = Math.abs(stock.change || 0);
   const isExtended = chg > 2.5;
   const mildExt    = chg > 1.5 && chg <= 2.5;
 
-  const qpr       = stock.qualityPassedRules || stock.matchedRules || [];
-  const stackScore = ml.stackScore || 0;
-  const pred       = stock.predReturnByRule || {};
-  const bestPred   = Object.values(pred).length ? Math.max(...Object.values(pred)) : 0;
+  // ── VWAP alignment ────────────────────────────────────────────────────────
+  const vwap       = stock.vwap || 0;
+  const vwapAligned = vwap > 0 && ((direction==='LONG' && price>vwap)||(direction==='SHORT' && price<vwap));
+  const vwapOpposed = vwap > 0 && ((direction==='LONG' && price<vwap)||(direction==='SHORT' && price>vwap));
 
+  // ── ATR proxy (volatility) ────────────────────────────────────────────────
+  const atrPct      = price > 0 ? (atr_proxy / price) : 0;
+  const atrHigh     = atrPct > 0.012;   // >1.2% of price = high ATR rank proxy
+
+  // ── ML signals ────────────────────────────────────────────────────────────
+  const stackScore  = ml.stackScore || 0;
+  const pred        = stock.predReturnByRule || {};
+  const bestPred    = Object.values(pred).length ? Math.max(...Object.values(pred)) : 0;
+
+  // ── Quality rules ─────────────────────────────────────────────────────────
+  const qpr         = stock.qualityPassedRules || stock.matchedRules || [];
+
+  // ── Momentum direction ────────────────────────────────────────────────────
+  const momAligned  = (direction==='LONG' && (stock.change||0)>0) ||
+                      (direction==='SHORT' && (stock.change||0)<0);
+
+  // ── EMA alignment proxy (use ML regime as EMA proxy) ─────────────────────
+  const regime      = ml.regime || '';
+  const emaAligned  = (direction==='LONG'  && regime==='Bull-Trend') ||
+                      (direction==='SHORT' && regime==='Bear-Trend');
+  const emaOpposed  = (direction==='LONG'  && (regime==='Bear-Trend'||regime==='High-Vol-Panic')) ||
+                      (direction==='SHORT' && regime==='Bull-Trend');
+
+  // ── Scoring with empirical weights ───────────────────────────────────────
   let conf = 0;
   const why = [];
 
-  if (regimeAligned)         { conf += 20; why.push('Regime aligned (+20)'); }
-  if (vwapAligned)           { conf += 10; why.push('VWAP aligned (+10)'); }
-  if (regimeOpposed)         { conf -= 25; why.push('Regime opposed (-25)'); }
-  if (vwapOpposed)           { conf -= 15; why.push('VWAP opposed (-15)'); }
-  if (posMatch)              { conf += 10; why.push('Price position match (+10)'); }
-  if (isNarrow)              { conf +=  8; why.push('Narrow CPR (+8)'); }
-  if (!isExtended&&!mildExt) { conf +=  8; why.push('Not extended (+8)'); }
+  const _add = (pts, label) => { conf += pts; why.push(`${label} (${pts>0?'+':''}${pts})`); };
 
-  if (qpr.length >= 3)      { conf += 12; why.push(qpr.length+' quality rules (+12)'); }
-  else if (qpr.length === 2) { conf +=  6; why.push('2 quality rules (+6)'); }
-  else if (qpr.length === 1) { conf +=  2; why.push('1 quality rule (+2)'); }
+  // CPR width (strongest signal in data)
+  if (isWide)       _add(_rw('wide_cpr'),    'Wide CPR');
+  else if (isNarrow) _add(_rw('narrow_cpr'), 'Narrow CPR');
 
-  if (stackScore >= 0.65)      { conf += 15; why.push('ML stack >65% (+15)'); }
-  else if (stackScore >= 0.50) { conf +=  8; why.push('ML stack >50% (+8)'); }
+  // Extension / momentum
+  if (isExtended)        _add(_rw('extended'),     'Extended >2.5%');
+  else if (mildExt)      _add(_rw('mild_ext'),     'Mild ext 1.5-2.5%');
+  else                   _add(_rw('not_extended'), 'Not extended');
 
+  // Momentum direction
+  if (momAligned)        _add(_rw('mom_aligned'),  'Momentum aligned');
+  else                   _add(_rw('mom_opposed'),  'Momentum opposed');
+
+  // VWAP
+  if (vwapAligned)       _add(_rw('vwap_aligned'), 'VWAP aligned');
+  else if (vwapOpposed)  _add(_rw('vwap_opposed'), 'VWAP opposed');
+
+  // EMA proxy (HMM regime)
+  if (emaAligned)        _add(_rw('ema_aligned'),  'Regime/EMA aligned');
+  else if (emaOpposed)   _add(_rw('ema_opposed'),  'Regime/EMA opposed');
+
+  // ATR proxy
+  if (atrHigh)           _add(_rw('atr_high'),     'High volatility');
+
+  // Quality rules
+  if (qpr.length >= 3)        _add(_rw('rules_3plus'), qpr.length+' quality rules');
+  else if (qpr.length === 2)  _add(_rw('rules_2'),     '2 quality rules');
+  else if (qpr.length === 1)  _add(_rw('rules_1'),     '1 quality rule');
+
+  // ML stack score (proxy for volume confirmation / model confidence)
+  if (stackScore >= 0.65)      _add(_rw('vol_surge'), 'ML stack >65%');
+  else if (stackScore >= 0.50) _add(_rw('vol_mid'),   'ML stack >50%');
+
+  // XGB pred
   if (bestPred > 1.5)      { conf += 12; why.push('XGB >1.5% (+12)'); }
   else if (bestPred > 0.5) { conf +=  6; why.push('XGB >0.5% (+6)'); }
   else if (bestPred > 0)   { conf +=  2; why.push('XGB >0% (+2)'); }
-
-  if (isExtended) { conf -= 10; why.push('Extended >2.5% (-10)'); }
-  else if (mildExt) { conf -= 5; why.push('Mild extended (-5)'); }
 
   const isR3setup = (stock.matchedRules||[]).some(r=>['rule3','rule4','rule5'].includes(r));
   let entry = price, sl, t1, t2, t3;
@@ -2752,6 +2840,9 @@ const Train = (() => {
 
   return { open, close, start, cancel, isRunning };
 })();
+
+// Load empirical rec weights on page start (non-blocking)
+loadRecWeights();
 </script>
 </body>
 </html>
