@@ -1235,6 +1235,42 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
     border-bottom: 1px solid var(--b1);
   }
 }
+
+/* ── REC BADGE ─────────────────────────────────────────── */
+.rec-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 3px 7px; border-radius: 5px;
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.03em; white-space: nowrap; cursor: default;
+}
+.rec-STRONG-BUY  { background: rgba(34,197,94,0.18);  color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
+.rec-BUY         { background: rgba(74,222,128,0.12); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+.rec-SPECULATIVE { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+.rec-NEUTRAL     { background: rgba(107,114,128,0.1); color: #9ca3af; border: 1px solid rgba(107,114,128,0.25); }
+.rec-AVOID       { background: rgba(239,68,68,0.1);   color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+.rec-conf        { font-size: 9px; opacity: 0.7; margin-left: 4px; font-weight: 600; }
+
+/* ── REC DETAIL PANEL ──────────────────────────────────── */
+.rec-detail-row td {
+  padding: 0 !important;
+  background: var(--bg0);
+  border-bottom: 2px solid var(--b1);
+}
+.rec-detail-panel {
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: auto auto auto auto auto 1fr;
+  gap: 8px 18px;
+  align-items: start;
+}
+.rec-detail-group { display: flex; flex-direction: column; gap: 2px; }
+.rec-detail-label { font-size: 9px; font-family: var(--mono); color: var(--t4); letter-spacing: 0.06em; text-transform: uppercase; }
+.rec-detail-value { font-size: 13px; font-family: var(--mono); font-weight: 700; color: var(--t1); }
+.rec-detail-why   { font-size: 10px; font-family: var(--mono); color: var(--t3); line-height: 1.6; }
+.rec-detail-rr-good { color: #4ade80; }
+.rec-detail-rr-ok   { color: #fbbf24; }
+.rec-detail-rr-bad  { color: #f87171; }
+tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
 </style>
 </head>
 <body>
@@ -1445,6 +1481,7 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
           <th onclick="App.sort('ml.stackScore')" data-sortkey="ml.stackScore" title="Ensemble stack score (XGB+LGBM+LSTM)">ML Score<span class="cfb" id="cfb-ml_stackScore" onclick="event.stopPropagation();App.openColFilter(event,'ml.stackScore')" title="Filter">▾</span></th>
           <th onclick="App.sort('ml.positionSize')" data-sortkey="ml.positionSize" title="PPO position sizing recommendation">Pos Size<span class="cfb" id="cfb-ml_positionSize" onclick="event.stopPropagation();App.openColFilter(event,'ml.positionSize')" title="Filter">▾</span></th>
           <th onclick="App.sort('ml.regime')" data-sortkey="ml.regime" title="HMM market regime">Regime<span class="cfb" id="cfb-ml_regime" onclick="event.stopPropagation();App.openColFilter(event,'ml.regime')" title="Filter">▾</span></th>
+          <th title="Buy/Sell recommendation (click row for detail)" style="min-width:96px">Rec</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
@@ -1505,6 +1542,166 @@ const TF_HINTS = {
 const $ = id => document.getElementById(id);
 const fmt = (v, d=2) => v != null ? v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }) : '–';
 const fmtPct = v => v != null ? (v > 0 ? '+' : '') + v.toFixed(2) + '%' : '–';
+
+// ─── BUY/SELL RECOMMENDATION ENGINE ──────────────────────────────────────────
+function computeRecommendation(stock) {
+  const cpr   = stock.cpr   || {};
+  const cam   = stock.camarilla || {};
+  const ml    = stock.ml    || {};
+  const price = stock.price || 0;
+  const tc = cpr.tc || 0, bc = cpr.bc || 0;
+  const r3 = cam.r3 || 0, s3 = cam.s3 || 0;
+
+  const spread    = r3 - s3;
+  const atr_proxy = spread > 0 ? spread / 4.0 : price * 0.01;
+
+  let direction;
+  if (price > tc)      direction = 'LONG';
+  else if (price < bc) direction = 'SHORT';
+  else                 direction = 'NEUTRAL';
+
+  if (direction === 'NEUTRAL') {
+    return { tier:'NEUTRAL', direction, confidence:0, rr:0,
+             entry:price, sl:null, t1:null, t2:null, t3:null,
+             atr:atr_proxy, why:['Price inside CPR — no directional bias'] };
+  }
+
+  const regime = ml.regime || '';
+  const regimeAligned = (direction==='LONG'  && regime==='Bull-Trend') ||
+                        (direction==='SHORT' && regime==='Bear-Trend');
+  const regimeOpposed = (direction==='LONG'  && (regime==='Bear-Trend'||regime==='High-Vol-Panic')) ||
+                        (direction==='SHORT' && regime==='Bull-Trend');
+
+  const vwap = stock.vwap || 0;
+  const vwapAligned = vwap > 0 && ((direction==='LONG' && price>vwap)||(direction==='SHORT' && price<vwap));
+  const vwapOpposed = vwap > 0 && ((direction==='LONG' && price<vwap)||(direction==='SHORT' && price>vwap));
+
+  const posClass = (stock.pricePosition || '').toUpperCase();
+  const posMatch  = (direction==='LONG'  && posClass==='ABOVE_TC') ||
+                    (direction==='SHORT' && posClass==='BELOW_BC');
+
+  const isNarrow   = cpr.widthPct < (typeof State!=='undefined' ? (State.narrowThreshold||0.5) : 0.5);
+  const chg        = Math.abs(stock.change || 0);
+  const isExtended = chg > 2.5;
+  const mildExt    = chg > 1.5 && chg <= 2.5;
+
+  const qpr       = stock.qualityPassedRules || stock.matchedRules || [];
+  const stackScore = ml.stackScore || 0;
+  const pred       = stock.predReturnByRule || {};
+  const bestPred   = Object.values(pred).length ? Math.max(...Object.values(pred)) : 0;
+
+  let conf = 0;
+  const why = [];
+
+  if (regimeAligned)         { conf += 20; why.push('Regime aligned (+20)'); }
+  if (vwapAligned)           { conf += 10; why.push('VWAP aligned (+10)'); }
+  if (regimeOpposed)         { conf -= 25; why.push('Regime opposed (-25)'); }
+  if (vwapOpposed)           { conf -= 15; why.push('VWAP opposed (-15)'); }
+  if (posMatch)              { conf += 10; why.push('Price position match (+10)'); }
+  if (isNarrow)              { conf +=  8; why.push('Narrow CPR (+8)'); }
+  if (!isExtended&&!mildExt) { conf +=  8; why.push('Not extended (+8)'); }
+
+  if (qpr.length >= 3)      { conf += 12; why.push(qpr.length+' quality rules (+12)'); }
+  else if (qpr.length === 2) { conf +=  6; why.push('2 quality rules (+6)'); }
+  else if (qpr.length === 1) { conf +=  2; why.push('1 quality rule (+2)'); }
+
+  if (stackScore >= 0.65)      { conf += 15; why.push('ML stack >65% (+15)'); }
+  else if (stackScore >= 0.50) { conf +=  8; why.push('ML stack >50% (+8)'); }
+
+  if (bestPred > 1.5)      { conf += 12; why.push('XGB >1.5% (+12)'); }
+  else if (bestPred > 0.5) { conf +=  6; why.push('XGB >0.5% (+6)'); }
+  else if (bestPred > 0)   { conf +=  2; why.push('XGB >0% (+2)'); }
+
+  if (isExtended) { conf -= 10; why.push('Extended >2.5% (-10)'); }
+  else if (mildExt) { conf -= 5; why.push('Mild extended (-5)'); }
+
+  const isR3setup = (stock.matchedRules||[]).some(r=>['rule3','rule4','rule5'].includes(r));
+  let entry = price, sl, t1, t2, t3;
+
+  if (direction === 'LONG') {
+    sl = isR3setup ? tc - atr_proxy*0.2 : bc - atr_proxy*0.3;
+    t1 = r3; t2 = r3 + spread*0.18; t3 = r3 + spread*0.36;
+  } else {
+    sl = isR3setup ? bc + atr_proxy*0.2 : tc + atr_proxy*0.3;
+    t1 = s3; t2 = s3 - spread*0.18; t3 = s3 - spread*0.36;
+  }
+
+  const reward = Math.abs(t1 - entry);
+  const risk   = Math.abs(sl  - entry);
+  const rr     = risk > 0 ? reward / risk : 0;
+
+  let tier;
+  if (rr >= 2.5 && conf >= 70 && regimeAligned) tier = 'STRONG BUY';
+  else if (rr >= 2.0 && conf >= 55)             tier = 'BUY';
+  else if (rr >= 1.5 && conf >= 40)             tier = 'SPECULATIVE';
+  else                                           tier = 'AVOID';
+
+  return { tier, direction, confidence:conf, rr, entry, sl, t1, t2, t3, atr:atr_proxy, why };
+}
+
+function recBadgeHtml(rec) {
+  const cls   = rec.tier.replace(' ','-');
+  const label = rec.tier==='SPECULATIVE' ? 'SPEC' : rec.tier==='STRONG BUY' ? 'STR BUY' : rec.tier;
+  const dir   = rec.direction==='LONG' ? '▲' : rec.direction==='SHORT' ? '▼' : '─';
+  const confStr = rec.tier==='NEUTRAL' ? '' : `<span class="rec-conf">${rec.confidence>0?'+':''}${rec.confidence}</span>`;
+  return `<span class="rec-badge rec-${cls}" title="R:R ${rec.rr.toFixed(2)} | Conf ${rec.confidence}">${dir} ${label}${confStr}</span>`;
+}
+
+function recDetailHtml(rec, stock) {
+  if (rec.tier === 'NEUTRAL') {
+    return `<div class="rec-detail-panel"><div class="rec-detail-why">Price inside CPR — no directional bias. Wait for breakout above TC (₹${fmt(stock.cpr.tc)}) or breakdown below BC (₹${fmt(stock.cpr.bc)}).</div></div>`;
+  }
+  const rrCls = rec.rr>=2.5?'rec-detail-rr-good':rec.rr>=1.5?'rec-detail-rr-ok':'rec-detail-rr-bad';
+  const slCol = rec.direction==='LONG'?'#f87171':'#4ade80';
+  const t1Col = rec.direction==='LONG'?'#4ade80':'#f87171';
+  return `<div class="rec-detail-panel">
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">Entry Zone</span>
+      <span class="rec-detail-value">₹${fmt(rec.entry)}</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">Stop Loss</span>
+      <span class="rec-detail-value" style="color:${slCol}">₹${fmt(rec.sl)}</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">T1</span>
+      <span class="rec-detail-value" style="color:${t1Col}">₹${fmt(rec.t1)}</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">T2</span>
+      <span class="rec-detail-value" style="color:${t1Col}">₹${fmt(rec.t2)}</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">T3</span>
+      <span class="rec-detail-value" style="color:${t1Col}">₹${fmt(rec.t3)}</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">R:R &nbsp;|&nbsp; Confidence</span>
+      <span class="rec-detail-value ${rrCls}">${rec.rr.toFixed(2)} : 1 &nbsp;|&nbsp; ${rec.confidence > 0 ? '+' : ''}${rec.confidence} pts</span>
+    </div>
+    <div class="rec-detail-group" style="grid-column:1/-1">
+      <span class="rec-detail-label">Signal factors</span>
+      <span class="rec-detail-why">${rec.why.join(' &nbsp;·&nbsp; ')}</span>
+    </div>
+  </div>`;
+}
+
+function toggleRecDetail(tr, rec, stock, totalCols) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains('rec-detail-row')) {
+    existing.remove();
+    tr.classList.remove('rec-row-expanded');
+    return;
+  }
+  tr.classList.add('rec-row-expanded');
+  const detailTr = document.createElement('tr');
+  detailTr.className = 'rec-detail-row';
+  const td = document.createElement('td');
+  td.colSpan = totalCols;
+  td.innerHTML = recDetailHtml(rec, stock);
+  detailTr.appendChild(td);
+  tr.insertAdjacentElement('afterend', detailTr);
+}
 
 function toast(msg, ms=3000) {
   const el = document.createElement('div');
@@ -2069,6 +2266,13 @@ const App = {
     tr.className = `match-${stock.matchCount}`;
     tr.dataset.sym = stock.symbol;
     tr.dataset.rules = stock.matchedRules.join(',');
+    const _rec = computeRecommendation(stock);
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', (e) => {
+      if (e.target.tagName==='A' || e.target.closest('a')) return;
+      const totalCols = document.querySelector('#resultsTable thead tr').children.length;
+      toggleRecDetail(tr, _rec, stock, totalCols);
+    });
 
     const chgClass = stock.change >= 0 ? 'pos' : 'neg';
     const chgSign  = stock.change >= 0 ? '+' : '';
@@ -2218,6 +2422,7 @@ const App = {
           return `<span style="color:${col};font-weight:600;white-space:nowrap" title="Regime score: ${ml.regimeScore}">${icon} ${ml.regime.replace('-',' ')}</span>`;
         })()}
       </td>
+      <td style="text-align:center;padding:6px 8px">${recBadgeHtml(_rec)}</td>
     `;
 
     return tr;
