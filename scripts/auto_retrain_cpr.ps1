@@ -92,7 +92,10 @@ try {
         "models/phase3_metrics.json", "models/phase4_metrics.json",
         "models/hmm_params.json",  "models/hmm_posteriors.json",
         "models/gate_weights.json","models/conformal_calibration.json",
-        "models/soft_blend_config.json"
+        "models/soft_blend_config.json",
+        "models/ppo_policy_weights.json",
+        "models/lgbm_scorer.txt", "models/shap_weights.json",
+        "models/phase2b_metrics.json"
     )
     foreach ($pat in $modelPatterns) {
         $files = Resolve-Path $pat -ErrorAction SilentlyContinue

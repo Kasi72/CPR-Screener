@@ -1,0 +1,13 @@
+{
+  "id": "drkasi/cpr-phase-4-ppo-position-sizing",
+  "title": "CPR Phase 4 PPO Position Sizing",
+  "code_file": "cpr_phase4_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["drkasi/cpr-screener-phase4-inputs"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

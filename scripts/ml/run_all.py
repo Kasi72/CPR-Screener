@@ -1,5 +1,5 @@
 """
-run_all.py — Run all 4 training phases in sequence.
+run_all.py — Run all training phases in sequence.
 
 Usage:
     python scripts/ml/run_all.py [--skip-dataset] [--local-phase3]
@@ -7,15 +7,21 @@ Usage:
 Steps:
     0. build_dataset.py          (re-run backtest to generate signal_dataset.csv)
     1. train_phase1.py           (HMM + LightGBM)
-    2. train_phase2.py           (SHAP weights + Conformal calibration)
+    2. train_phase2.py           (SHAP gate weights + Conformal calibration)
+   2b. kaggle_phase2b_runner.py  (LightGBM HPO signal scorer — runs on Kaggle CPU)
     3. kaggle_phase3_runner.py   (LSTM + Stacking — runs on Kaggle T4 GPU)
        OR train_phase3.py        (local CPU fallback with --local-phase3)
-    4. train_phase4.py           (PPO position sizing)
+    4. kaggle_phase4_runner.py   (PPO position sizing — runs on Kaggle)
+       OR train_phase4.py        (local CPU fallback with --local-phase4)
 
-Phase 3 Kaggle flags:
-    --local-phase3               Force local CPU training (skip Kaggle)
-    --skip-upload                Re-use existing Kaggle dataset (faster re-runs)
-    --timeout-minutes N          Kaggle poll timeout in minutes (default: 120)
+Phase 2b/3/4 Kaggle flags:
+    --skip-phase2b               Skip Phase 2b (LightGBM HPO — runs on Kaggle)
+    --local-phase3               Force local CPU training for Phase 3
+    --local-phase4               Force local CPU training for Phase 4
+    --skip-upload                Re-use existing Kaggle dataset for Phase 3
+    --timeout-minutes N          Kaggle poll timeout for Phase 3 (default: 120)
+    --p4-timeout-minutes N       Kaggle poll timeout for Phase 4 (default: 60)
+    --p2b-timeout-minutes N      Kaggle poll timeout for Phase 2b (default: 90)
 """
 
 import subprocess, sys, os, time, shutil
@@ -53,28 +59,50 @@ def run(script, label, extra_args=None):
 
 
 def main():
-    args         = sys.argv[1:]
-    skip_dataset = '--skip-dataset'    in args
-    skip_p1      = '--skip-phase1'     in args
-    skip_p2      = '--skip-phase2'     in args
-    skip_p3      = '--skip-phase3'     in args
-    skip_p4      = '--skip-phase4'     in args
-    local_p3     = '--local-phase3'    in args
-    skip_upload  = '--skip-upload'     in args
+    args          = sys.argv[1:]
+    skip_dataset  = '--skip-dataset'    in args
+    skip_p1       = '--skip-phase1'     in args
+    skip_p2       = '--skip-phase2'     in args
+    skip_p2b      = '--skip-phase2b'    in args
+    skip_p3       = '--skip-phase3'     in args
+    skip_p4       = '--skip-phase4'     in args
+    local_p3      = '--local-phase3'    in args
+    local_p4      = '--local-phase4'    in args
+    skip_upload   = '--skip-upload'     in args
 
-    timeout_min = 120
+    timeout_min     = 120
+    p4_timeout_min  = 60
+    p2b_timeout_min = 90
     for a in args:
         if a.startswith('--timeout-minutes='):
             timeout_min = int(a.split('=')[1])
+        if a.startswith('--p4-timeout-minutes='):
+            p4_timeout_min = int(a.split('=')[1])
+        if a.startswith('--p2b-timeout-minutes='):
+            p2b_timeout_min = int(a.split('=')[1])
 
-    # Decide Phase 3 execution mode
-    use_kaggle = (not local_p3) and _kaggle_available()
+    # Decide execution modes
+    kaggle_ok     = _kaggle_available()
+    use_kaggle_p2b = kaggle_ok and not skip_p2b
+    use_kaggle_p3  = (not local_p3) and kaggle_ok
+    use_kaggle_p4  = (not local_p4) and kaggle_ok
+    if not skip_p2b:
+        if use_kaggle_p2b:
+            print('\n  Phase 2b → Kaggle CPU  (use --skip-phase2b to skip)')
+        else:
+            print('\n  Phase 2b → SKIPPED  (kaggle CLI not available)')
     if not skip_p3:
-        if use_kaggle:
+        if use_kaggle_p3:
             print("\n  Phase 3 → Kaggle GPU  (use --local-phase3 to run locally)")
         else:
             reason = "--local-phase3 flag" if local_p3 else "kaggle CLI not available"
             print(f"\n  Phase 3 → Local CPU  ({reason})")
+    if not skip_p4:
+        if use_kaggle_p4:
+            print("\n  Phase 4 → Kaggle     (use --local-phase4 to run locally)")
+        else:
+            reason = "--local-phase4 flag" if local_p4 else "kaggle CLI not available"
+            print(f"\n  Phase 4 → Local CPU  ({reason})")
 
     steps = []
     if not skip_dataset:
@@ -83,8 +111,12 @@ def main():
         steps.append(('train_phase1.py', 'Phase 1: HMM + LightGBM', None))
     if not skip_p2:
         steps.append(('train_phase2.py', 'Phase 2: SHAP + Conformal', None))
+    if use_kaggle_p2b:
+        p2b_extra = [f'--timeout-minutes={p2b_timeout_min}']
+        steps.append(('kaggle_phase2b_runner.py',
+                      'Phase 2b: LightGBM HPO Scorer (Kaggle CPU)', p2b_extra))
     if not skip_p3:
-        if use_kaggle:
+        if use_kaggle_p3:
             p3_extra = [f'--timeout-minutes={timeout_min}']
             if skip_upload:
                 p3_extra.append('--skip-upload')
@@ -93,7 +125,12 @@ def main():
         else:
             steps.append(('train_phase3.py', 'Phase 3: LSTM + Stacking (local)', None))
     if not skip_p4:
-        steps.append(('train_phase4.py', 'Phase 4: PPO Sizer', None))
+        if use_kaggle_p4:
+            p4_extra = [f'--timeout-minutes={p4_timeout_min}']
+            steps.append(('kaggle_phase4_runner.py',
+                          'Phase 4: PPO Sizer (Kaggle)', p4_extra))
+        else:
+            steps.append(('train_phase4.py', 'Phase 4: PPO Sizer (local)', None))
 
     print("\n" + "="*60)
     print("  Dr KKR CPR Screener — Full ML Training Pipeline")

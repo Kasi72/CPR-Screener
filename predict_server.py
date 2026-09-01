@@ -2,17 +2,21 @@
 Multi-model prediction microservice — port 5001
 
 Endpoints:
-  POST /predict          → XGBoost score (original, backward-compatible)
-  POST /predict_ensemble → XGB + LGBM + LSTM stacking ensemble score
-  GET  /regime           → current HMM regime
-  POST /position_size    → PPO position sizing recommendation
-  GET  /gate_weights     → SHAP-derived gate weights
+  POST /predict              → XGBoost score (original, backward-compatible)
+  POST /predict_ensemble     → XGB + LGBM + LSTM stacking ensemble score
+  GET  /regime               → current HMM regime
+  POST /position_size        → PPO position sizing recommendation
+  GET  /gate_weights         → SHAP-derived gate weights
   GET  /health
+  POST /api/train/start      → launch run_all.py pipeline
+  GET  /api/train/status     → current pipeline status + last-run time
+  GET  /api/train/stream     → SSE stream of pipeline stdout
+  POST /api/train/cancel     → kill running pipeline
 """
 
-import os, json, sys, threading
+import os, json, sys, threading, subprocess, time, queue
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import xgboost as xgb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -380,6 +384,134 @@ def health():
         'ppo_weights', 'gate_weights',
     ] if k in models]
     return jsonify({'status': 'ok', 'models_loaded': loaded})
+
+
+# ─────────────────────────── Train pipeline routes ───────────────────────────
+
+_BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+_RUN_ALL     = os.path.join(_BASE_DIR, 'scripts', 'ml', 'run_all.py')
+_TRAIN_STAMP = os.path.join(_BASE_DIR, 'auto_retrain_cpr.last_run')
+
+_train_state = {
+    'status':   'idle',    # idle | running | done | failed | cancelled
+    'last_run': None,
+    'proc':     None,
+    'lock':     threading.Lock(),
+    'queue':    queue.Queue(),
+}
+
+
+def _read_last_run():
+    try:
+        if os.path.exists(_TRAIN_STAMP):
+            return open(_TRAIN_STAMP).read().strip()
+    except Exception:
+        pass
+    return None
+
+
+def _pipeline_thread(cmd):
+    st = _train_state
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=_BASE_DIR,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        with st['lock']:
+            st['proc'] = proc
+
+        for line in proc.stdout:
+            st['queue'].put({'line': line.rstrip()})
+
+        proc.wait()
+        with st['lock']:
+            st['proc'] = None
+            if proc.returncode == 0:
+                st['status']   = 'done'
+                st['last_run'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+                # persist stamp
+                try:
+                    open(_TRAIN_STAMP, 'w').write(st['last_run'])
+                except Exception:
+                    pass
+                load_models()   # hot-reload new model files
+            elif st['status'] != 'cancelled':
+                st['status'] = 'failed'
+        st['queue'].put({'status': st['status']})
+
+    except Exception as exc:
+        with st['lock']:
+            st['proc']   = None
+            st['status'] = 'failed'
+        _train_state['queue'].put({'line': f'[INTERNAL ERROR] {exc}', 'status': 'failed'})
+
+
+@app.route('/api/train/start', methods=['POST'])
+def train_start():
+    st = _train_state
+    with st['lock']:
+        if st['status'] == 'running':
+            return jsonify({'error': 'Pipeline already running'}), 409
+        st['status'] = 'running'
+        # drain stale queue
+        while not st['queue'].empty():
+            try:
+                st['queue'].get_nowait()
+            except queue.Empty:
+                break
+
+    skip_upload  = request.args.get('skipUpload') == '1'
+    local_phase4 = request.args.get('localPhase4') == '1'
+
+    cmd = [sys.executable, _RUN_ALL, '--skip-dataset']
+    if skip_upload:
+        cmd.append('--skip-upload')
+    if local_phase4:
+        cmd.append('--local-phase4')
+
+    t = threading.Thread(target=_pipeline_thread, args=(cmd,), daemon=True)
+    t.start()
+    return jsonify({'ok': True, 'cmd': ' '.join(cmd)})
+
+
+@app.route('/api/train/status', methods=['GET'])
+def train_status():
+    st = _train_state
+    return jsonify({
+        'status':  st['status'],
+        'lastRun': st.get('last_run') or _read_last_run(),
+    })
+
+
+@app.route('/api/train/stream', methods=['GET'])
+def train_stream():
+    def generate():
+        while True:
+            try:
+                item = _train_state['queue'].get(timeout=30)
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get('status') in ('done', 'failed', 'cancelled'):
+                    break
+            except queue.Empty:
+                yield f"data: {json.dumps({'ping': 1})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+@app.route('/api/train/cancel', methods=['POST'])
+def train_cancel():
+    st = _train_state
+    with st['lock']:
+        proc = st.get('proc')
+        if proc and proc.poll() is None:
+            proc.terminate()
+            st['status'] = 'cancelled'
+            st['proc']   = None
+            st['queue'].put({'status': 'cancelled'})
+            return jsonify({'ok': True})
+    return jsonify({'ok': False, 'error': 'No running pipeline'})
 
 
 if __name__ == '__main__':

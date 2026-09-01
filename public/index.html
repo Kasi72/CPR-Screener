@@ -1314,15 +1314,20 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
 
     <div class="train-info-box">
       <span style="color:var(--t3);font-size:11px">Runs:</span>
-      <span style="color:var(--t2);font-size:11px">build_dataset → Phase1 HMM/LGBM → Phase2 SHAP/Conformal → Phase3 LSTM Kaggle GPU → Phase4 PPO</span>
+      <span style="color:var(--t2);font-size:11px">Phase1 HMM/LGBM → Phase2 SHAP/Conformal → Phase3 LSTM (Kaggle GPU) → Phase4 PPO (Kaggle)</span>
     </div>
 
     <div class="train-log" id="trainLog"><span style="color:var(--t4);font-style:italic">Pipeline output will appear here…</span></div>
 
     <div class="train-modal-footer">
-      <label class="train-skip-label">
-        <input type="checkbox" id="trainSkipUpload"> Re-use existing Kaggle dataset
-      </label>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label class="train-skip-label">
+          <input type="checkbox" id="trainSkipUpload"> Re-use existing Kaggle dataset (Phase 3)
+        </label>
+        <label class="train-skip-label">
+          <input type="checkbox" id="trainLocalPhase4"> Run Phase 4 PPO locally (skip Kaggle)
+        </label>
+      </div>
       <div style="display:flex;gap:8px">
         <button class="train-cancel-api-btn" id="trainCancelBtn" onclick="Train.cancel()" style="display:none">■ Cancel</button>
         <button class="train-start-btn" id="trainStartBtn" onclick="Train.start()">▶ Start Training</button>
@@ -2812,8 +2817,11 @@ const Train = (() => {
     const log = $('trainLog');
     log.innerHTML = '';
     _setStatus('starting');
-    const skipUpload = $('trainSkipUpload').checked ? '?skipUpload=1' : '';
-    fetch(`/api/train/start${skipUpload}`, { method: 'POST' })
+    const params = new URLSearchParams();
+    if ($('trainSkipUpload').checked)  params.set('skipUpload', '1');
+    if ($('trainLocalPhase4').checked) params.set('localPhase4', '1');
+    const qs = params.toString() ? '?' + params.toString() : '';
+    fetch(`/api/train/start${qs}`, { method: 'POST' })
       .then(r => r.json())
       .then(d => {
         if (d.error) { _appendLog('[ERROR] ' + d.error); _setStatus('failed'); return; }

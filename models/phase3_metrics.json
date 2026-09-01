@@ -1,14 +1,21 @@
 {
-  "lstm_auc": 0.5029,
-  "xgb_weight": -1.3479501322237528,
-  "lgbm_weight": 1.2412846780875544,
-  "lstm_weight": -5.286213934651074,
-  "regime_weight": 5.701621955519424,
-  "intercept": -0.7411395054171478,
-  "auc_xgb": 0.5343,
-  "auc_lgbm": 0.5463,
-  "auc_lstm": 0.4937,
-  "auc_regime": 0.6157,
-  "auc_stack": 0.6686,
-  "threshold": 0.5
+  "lstm_auc": 0.5818,
+  "meta_learner": "lgbm",
+  "meta_lgbm_path": "/kaggle/working/meta_lgbm.txt",
+  "auc_xgb": 0.5433,
+  "auc_lgbm": 0.5455,
+  "auc_lstm": 0.5518,
+  "auc_regime": 0.5455,
+  "auc_soft": 0.5455,
+  "auc_stack": 0.5917,
+  "threshold": 0.31,
+  "threshold_precision": 0.3488,
+  "best_xgb_params": {
+    "max_depth": 3,
+    "eta": 0.033494758473134406,
+    "subsample": 0.9464704583099741,
+    "colsample_bytree": 0.8404460046972835,
+    "min_child_weight": 15,
+    "seed": 42
+  }
 }

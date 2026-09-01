@@ -1,0 +1,13 @@
+{
+  "id": "drkasi/cpr-phase-2b-lightgbm-hpo-signal-scorer",
+  "title": "CPR Phase 2b LightGBM HPO Signal Scorer",
+  "code_file": "cpr_phase2b_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["drkasi/cpr-screener-phase4-inputs"],
+  "competition_sources": [],
+  "kernel_sources": []
+}
