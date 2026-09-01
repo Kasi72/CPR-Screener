@@ -25,7 +25,7 @@ KAGGLE_DIR = os.path.join(BASE, 'kaggle')
 MODELS_DIR = os.path.join(BASE, 'models')
 
 DATASET_SLUG = 'drkasi/cpr-screener-phase3-inputs'
-KERNEL_SLUG  = 'drkasi/cpr-phase3-lstm'
+KERNEL_SLUG  = 'drkasi/cpr-phase-3-lstm-training'
 
 # Max size (bytes) for OHLCV optional upload — skip if larger
 OHLCV_MAX_BYTES = 2 * 1024 ** 3   # 2 GB
@@ -161,24 +161,33 @@ def poll_kernel(timeout_minutes=120):
     start    = time.time()
 
     while time.time() < deadline:
-        r = _kaggle('kernels', 'status', KERNEL_SLUG, capture=True)
-        output = (r.stdout or '').strip()
-        # Status line looks like: "drkasi/cpr-phase3-lstm ... running"
+        # Use check=False so non-zero exit (e.g. queued state) doesn't raise
+        r = _run(['kaggle', 'kernels', 'status', KERNEL_SLUG], check=False, capture=True)
+        output = ((r.stdout or '') + (r.stderr or '')).strip()
+        output_lower = output.lower()
+
         status = 'unknown'
-        for token in ['complete', 'running', 'queued', 'error', 'cancelAcknowledged']:
-            if token in output.lower():
-                status = token
-                break
+        # Kaggle CLI outputs: "status" field in text or JSON-ish line
+        if 'complete' in output_lower:
+            status = 'complete'
+        elif 'error' in output_lower:
+            status = 'error'
+        elif 'running' in output_lower:
+            status = 'running'
+        elif 'queued' in output_lower or 'pending' in output_lower:
+            status = 'queued'
+        elif 'cancelacknowledged' in output_lower or 'cancelled' in output_lower:
+            status = 'cancelacknowledged'
 
         elapsed = (time.time() - start) / 60
-        print(f"    [{elapsed:5.1f} min]  status: {status}", flush=True)
+        print(f"    [{elapsed:5.1f} min]  status: {status}  raw: {output[:120]}", flush=True)
 
         if status == 'complete':
             print("    Kernel complete!")
             return True
         if status in ('error', 'cancelacknowledged'):
             print(f"    Kernel failed with status: {status}")
-            print(f"    Output:\n{output}")
+            print(f"    Full output:\n{output}")
             return False
 
         time.sleep(interval)
@@ -248,6 +257,8 @@ def main(timeout_minutes=120, skip_upload=False):
 
         if not skip_upload:
             upload_dataset(staging_dir)
+            print("  [2.5] Waiting 60s for Kaggle to index the dataset …")
+            time.sleep(60)
         else:
             print("  [2/5] Skipping dataset upload (--skip-upload).")
 
