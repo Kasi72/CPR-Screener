@@ -25,14 +25,15 @@ while (-not ($p4done -and $p2bdone) -and -not ($p4error -or $p2berror)) {
         if (Test-Path $P4LOG) {
             $tail = Get-Content $P4LOG -Tail 5
             if ($tail -match 'DONE:phase4') { $p4done = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 4 DONE" }
-            if ($tail -match 'Timeout|FAILED') { $p4error = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 4 ERROR/TIMEOUT"; $tail }
+            # Match only the terminal error lines (not the startup banner "(timeout N min)")
+            if ($tail -match '^Timeout\.$|^    Timeout after|FAILED:|Kernel failed:') { $p4error = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 4 ERROR/TIMEOUT"; $tail }
         }
     }
     if (-not $p2bdone) {
         if (Test-Path $P2BLOG) {
             $tail = Get-Content $P2BLOG -Tail 5
             if ($tail -match 'Phase 2b download done') { $p2bdone = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 2b DONE" }
-            if ($tail -match 'Timeout|FAILED') { $p2berror = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 2b ERROR/TIMEOUT"; $tail }
+            if ($tail -match '^Timeout\.$|^    Timeout after|FAILED:|Kernel failed:') { $p2berror = $true; Write-Host "[$(Get-Date -f HH:mm:ss)] Phase 2b ERROR/TIMEOUT"; $tail }
         }
     }
 
