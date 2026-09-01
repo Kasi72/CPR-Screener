@@ -1,0 +1,17 @@
+{
+  "best_cv_auc": 0.5958,
+  "final_val_auc": 0.6124,
+  "n_rows": 1394131,
+  "n_features": 38,
+  "best_params": {
+    "num_leaves": 179,
+    "learning_rate": 0.015421044701186729,
+    "feature_fraction": 0.7696762577991794,
+    "bagging_fraction": 0.828010883357755,
+    "bagging_freq": 1,
+    "min_child_samples": 118,
+    "reg_alpha": 1.2892695473405666,
+    "reg_lambda": 0.003995614278403883
+  },
+  "runtime_min": 48.8
+}
