@@ -40,7 +40,23 @@ MODELS = os.path.join(INPUT, 'models')
 WORK   = '/kaggle/working'
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-print(f"Device: {DEVICE}")
+# Verify CUDA LSTM actually runs on this Kaggle instance.
+# cudaErrorNoKernelImageForDevice = PyTorch binary not compiled for this GPU's
+# compute capability (sm mismatch). Fall back to CPU rather than crash.
+if DEVICE.type == 'cuda':
+    try:
+        _test = torch.nn.LSTM(4, 8, batch_first=True).to(DEVICE)
+        _inp  = torch.zeros(2, 5, 4, device=DEVICE)
+        _test(_inp)
+        del _test, _inp
+        print(f"Device: {DEVICE}  (CUDA LSTM verified ✓)")
+    except Exception as _e:
+        print(f"CUDA LSTM probe failed ({type(_e).__name__}: {_e})")
+        print("Falling back to CPU — will be slower but will complete.")
+        DEVICE = torch.device('cpu')
+else:
+    print(f"Device: {DEVICE}")
+
 os.makedirs(WORK, exist_ok=True)
 
 
