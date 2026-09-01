@@ -146,6 +146,202 @@ header {
   font-family: var(--mono);
 }
 
+/* ── TRAIN HEADER BUTTON ───────────────────────────────── */
+.train-hdr-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  background: rgba(139,92,246,0.12);
+  border: 1px solid rgba(139,92,246,0.35);
+  border-radius: 20px;
+  color: var(--purple);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.train-hdr-btn:hover { background: rgba(139,92,246,0.22); border-color: rgba(139,92,246,0.6); }
+.train-hdr-btn.running {
+  background: rgba(245,158,11,0.12);
+  border-color: rgba(245,158,11,0.45);
+  color: var(--yellow);
+  animation: train-pulse 1.8s ease-in-out infinite;
+}
+.train-hdr-icon { font-size: 13px; }
+
+@keyframes train-pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ── TRAIN MODAL ────────────────────────────────────────── */
+.train-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(5,9,17,0.75);
+  backdrop-filter: blur(6px);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+.train-overlay.open { display: flex; }
+
+.train-modal {
+  width: min(760px, 96vw);
+  background: var(--bg1);
+  border: 1px solid var(--b2);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(139,92,246,0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  max-height: 90vh;
+}
+
+.train-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--b1);
+  background: rgba(139,92,246,0.06);
+}
+.train-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--t1);
+}
+.train-modal-icon { font-size: 16px; }
+.train-close-btn {
+  background: none;
+  border: none;
+  color: var(--t3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s;
+}
+.train-close-btn:hover { color: var(--t1); }
+
+.train-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px 4px;
+}
+
+.train-status-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid;
+}
+.train-status-pill.idle      { color: var(--t3); border-color: var(--b2); background: var(--glass); }
+.train-status-pill.starting,
+.train-status-pill.running   { color: var(--yellow); border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.08); }
+.train-status-pill.done      { color: var(--green);  border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.08); }
+.train-status-pill.failed,
+.train-status-pill.cancelled { color: var(--red);    border-color: rgba(239,68,68,0.4);  background: rgba(239,68,68,0.08); }
+
+.train-last-run {
+  font-size: 11px;
+  color: var(--t3);
+  font-family: var(--mono);
+}
+
+.train-info-box {
+  display: flex;
+  gap: 8px;
+  margin: 4px 20px 0;
+  padding: 8px 10px;
+  background: var(--bg2);
+  border-radius: 8px;
+  border: 1px solid var(--b1);
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+
+.train-log {
+  flex: 1;
+  min-height: 280px;
+  max-height: 380px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--t2);
+  background: var(--bg0);
+  padding: 12px 16px;
+  margin: 12px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--b1);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.train-log .log-phase  { color: var(--cyan);   font-weight: 600; }
+.train-log .log-ok     { color: var(--green);  }
+.train-log .log-err    { color: var(--red);    }
+.train-log .log-warn   { color: var(--yellow); }
+
+.train-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--b1);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.train-skip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--t3);
+  cursor: pointer;
+}
+.train-skip-label input { accent-color: var(--purple); cursor: pointer; }
+
+.train-start-btn {
+  padding: 8px 20px;
+  background: linear-gradient(135deg, var(--purple), var(--purple2));
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  letter-spacing: 0.3px;
+}
+.train-start-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
+.train-start-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.train-cancel-api-btn {
+  padding: 8px 16px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: 8px;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.train-cancel-api-btn:hover { background: rgba(239,68,68,0.2); }
+
 /* ── MAIN LAYOUT ───────────────────────────────────────── */
 main {
   display: grid;
@@ -1052,6 +1248,10 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
   </div>
   <div class="header-right">
     <div id="regimeBadge" style="display:none;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;border:1px solid currentColor;margin-right:8px" title="HMM Market Regime"></div>
+    <button id="trainBtn" class="train-hdr-btn" onclick="Train.open()" title="Manual ML retrain">
+      <span class="train-hdr-icon">⚡</span>
+      <span id="trainBtnLabel">Train</span>
+    </button>
     <div class="market-badge" id="marketBadge">
       <div class="market-dot"></div>
       <span id="marketStatus">–</span>
@@ -1059,6 +1259,41 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
     <div class="header-time" id="headerTime">–</div>
   </div>
 </header>
+
+<!-- TRAIN MODAL -->
+<div id="trainOverlay" class="train-overlay" onclick="if(event.target===this&&!Train.isRunning())Train.close()">
+  <div class="train-modal">
+    <div class="train-modal-header">
+      <div class="train-modal-title">
+        <span class="train-modal-icon">⚡</span>
+        ML Pipeline — Manual Retrain
+      </div>
+      <button class="train-close-btn" onclick="Train.close()" id="trainCloseBtn">✕</button>
+    </div>
+
+    <div class="train-meta-row">
+      <div class="train-status-pill" id="trainStatusPill">IDLE</div>
+      <div class="train-last-run" id="trainLastRun">Last run: checking…</div>
+    </div>
+
+    <div class="train-info-box">
+      <span style="color:var(--t3);font-size:11px">Runs:</span>
+      <span style="color:var(--t2);font-size:11px">build_dataset → Phase1 HMM/LGBM → Phase2 SHAP/Conformal → Phase3 LSTM Kaggle GPU → Phase4 PPO</span>
+    </div>
+
+    <div class="train-log" id="trainLog"><span style="color:var(--t4);font-style:italic">Pipeline output will appear here…</span></div>
+
+    <div class="train-modal-footer">
+      <label class="train-skip-label">
+        <input type="checkbox" id="trainSkipUpload"> Re-use existing Kaggle dataset
+      </label>
+      <div style="display:flex;gap:8px">
+        <button class="train-cancel-api-btn" id="trainCancelBtn" onclick="Train.cancel()" style="display:none">■ Cancel</button>
+        <button class="train-start-btn" id="trainStartBtn" onclick="Train.start()">▶ Start Training</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <main>
 <!-- SIDEBAR -->
@@ -2180,6 +2415,138 @@ function refreshGateUI() {
 initRules();
 initLists();
 initGates();
+
+// ─── TRAIN MODULE ─────────────────────────────────────────────────────────────
+const Train = (() => {
+  let _sse = null;
+  let _status = 'idle';
+
+  const $ = id => document.getElementById(id);
+
+  function isRunning() {
+    return _status === 'running' || _status === 'starting';
+  }
+
+  function open() {
+    $('trainOverlay').classList.add('open');
+    fetchStatus();
+  }
+
+  function close() {
+    if (isRunning()) return; // block close while running
+    $('trainOverlay').classList.remove('open');
+  }
+
+  function _setStatus(s) {
+    _status = s;
+    const pill = $('trainStatusPill');
+    pill.textContent = s.toUpperCase();
+    pill.className = 'train-status-pill ' + s;
+
+    const btn = $('trainBtn');
+    if (s === 'running' || s === 'starting') {
+      btn.classList.add('running');
+      $('trainBtnLabel').textContent = 'Training…';
+    } else {
+      btn.classList.remove('running');
+      $('trainBtnLabel').textContent = 'Train';
+    }
+
+    $('trainStartBtn').disabled  = isRunning();
+    $('trainCancelBtn').style.display = isRunning() ? '' : 'none';
+    $('trainCloseBtn').style.display  = isRunning() ? 'none' : '';
+  }
+
+  function _appendLog(text) {
+    const log = $('trainLog');
+    // First append clears placeholder
+    if (log.querySelector('span[style*="italic"]')) log.innerHTML = '';
+    const lines = text.split('\n');
+    lines.forEach(line => {
+      if (!line && line !== lines[lines.length - 1]) return;
+      const span = document.createElement('span');
+      if (/✓|COMPLETE|DONE|success/i.test(line))     span.className = 'log-ok';
+      else if (/✗|error|failed|exception/i.test(line)) span.className = 'log-err';
+      else if (/warning|warn/i.test(line))              span.className = 'log-warn';
+      else if (/^={3,}|Phase [0-9]|Step [0-9]/i.test(line)) span.className = 'log-phase';
+      span.textContent = line + '\n';
+      log.appendChild(span);
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function fetchStatus() {
+    fetch('/api/train/status').then(r => r.json()).then(d => {
+      _setStatus(d.status || 'idle');
+      const lr = $('trainLastRun');
+      if (d.lastRun) {
+        const dt = new Date(d.lastRun);
+        const ago = _ago(dt);
+        lr.textContent = `Last run: ${dt.toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'})} ${dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} (${ago})`;
+      } else {
+        lr.textContent = 'Last run: never';
+      }
+      if (d.status === 'running' || d.status === 'starting') _attachStream();
+    }).catch(() => {});
+  }
+
+  function _ago(dt) {
+    const mins = Math.round((Date.now() - dt) / 60000);
+    if (mins < 1)   return 'just now';
+    if (mins < 60)  return `${mins}m ago`;
+    const h = Math.floor(mins / 60);
+    if (h < 24)     return `${h}h ago`;
+    return `${Math.floor(h/24)}d ago`;
+  }
+
+  function _attachStream() {
+    if (_sse) { _sse.close(); _sse = null; }
+    _sse = new EventSource('/api/train/stream');
+    _sse.onmessage = ev => {
+      const d = JSON.parse(ev.data);
+      if (d.line !== undefined) _appendLog(d.line);
+      if (d.status)             _setStatus(d.status);
+      if (d.status === 'done' || d.status === 'failed' || d.status === 'cancelled') {
+        _sse.close(); _sse = null;
+        fetchStatus(); // refresh last-run timestamp
+      }
+    };
+    _sse.onerror = () => { _sse.close(); _sse = null; };
+  }
+
+  function start() {
+    if (isRunning()) return;
+    const log = $('trainLog');
+    log.innerHTML = '';
+    _setStatus('starting');
+    const skipUpload = $('trainSkipUpload').checked ? '?skipUpload=1' : '';
+    fetch(`/api/train/start${skipUpload}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { _appendLog('[ERROR] ' + d.error); _setStatus('failed'); return; }
+        _setStatus('running');
+        _attachStream();
+      })
+      .catch(e => { _appendLog('[ERROR] ' + e.message); _setStatus('failed'); });
+  }
+
+  function cancel() {
+    fetch('/api/train/cancel', { method: 'POST' })
+      .then(() => { _setStatus('cancelled'); if (_sse) { _sse.close(); _sse = null; } })
+      .catch(() => {});
+  }
+
+  // Poll header button state when modal is closed
+  setInterval(() => {
+    if (!$('trainOverlay').classList.contains('open')) {
+      fetch('/api/train/status').then(r => r.json()).then(d => {
+        if (d.status !== _status) _setStatus(d.status || 'idle');
+      }).catch(() => {});
+    }
+  }, 5000);
+
+  return { open, close, start, cancel, isRunning };
+})();
 </script>
 </body>
 </html>

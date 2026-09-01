@@ -1,0 +1,13 @@
+{
+  "id": "drkasi/cpr-phase3-lstm",
+  "title": "CPR Phase 3 LSTM Training",
+  "code_file": "cpr_phase3_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": false,
+  "dataset_sources": ["drkasi/cpr-screener-phase3-inputs"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

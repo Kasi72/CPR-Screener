@@ -2,28 +2,49 @@
 run_all.py — Run all 4 training phases in sequence.
 
 Usage:
-    python scripts/ml/run_all.py [--skip-dataset]
+    python scripts/ml/run_all.py [--skip-dataset] [--local-phase3]
 
 Steps:
-    0. build_dataset.py   (re-run backtest to generate signal_dataset.csv)
-    1. train_phase1.py    (HMM + LightGBM)
-    2. train_phase2.py    (SHAP weights + Conformal calibration)
-    3. train_phase3.py    (LSTM + Stacking)
-    4. train_phase4.py    (PPO position sizing)
+    0. build_dataset.py          (re-run backtest to generate signal_dataset.csv)
+    1. train_phase1.py           (HMM + LightGBM)
+    2. train_phase2.py           (SHAP weights + Conformal calibration)
+    3. kaggle_phase3_runner.py   (LSTM + Stacking — runs on Kaggle T4 GPU)
+       OR train_phase3.py        (local CPU fallback with --local-phase3)
+    4. train_phase4.py           (PPO position sizing)
+
+Phase 3 Kaggle flags:
+    --local-phase3               Force local CPU training (skip Kaggle)
+    --skip-upload                Re-use existing Kaggle dataset (faster re-runs)
+    --timeout-minutes N          Kaggle poll timeout in minutes (default: 120)
 """
 
-import subprocess, sys, os, time, signal
+import subprocess, sys, os, time, shutil
 
-BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE    = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = os.path.join(BASE, 'scripts', 'ml')
 
-def run(script, label):
+
+def _kaggle_available():
+    """Return True if kaggle CLI is on PATH and credentials are configured."""
+    try:
+        r = subprocess.run(['kaggle', '--version'], capture_output=True, text=True)
+        if r.returncode != 0:
+            return False
+        cred = os.path.join(os.path.expanduser('~'), '.kaggle', 'kaggle.json')
+        return os.path.exists(cred)
+    except FileNotFoundError:
+        return False
+
+
+def run(script, label, extra_args=None):
     print(f"\n{'='*60}")
     print(f"  Running: {label}")
     print(f"{'='*60}\n")
     t0  = time.time()
-    ret = subprocess.run([sys.executable, os.path.join(SCRIPTS, script)],
-                        cwd=BASE, check=False)
+    cmd = [sys.executable, os.path.join(SCRIPTS, script)]
+    if extra_args:
+        cmd.extend(extra_args)
+    ret = subprocess.run(cmd, cwd=BASE, check=False)
     elapsed = time.time() - t0
     ok = ret.returncode == 0
     status = '✓' if ok else f'✗ (exit {ret.returncode})'
@@ -32,24 +53,47 @@ def run(script, label):
 
 
 def main():
-    args = sys.argv[1:]
-    skip_dataset = '--skip-dataset' in args
-    skip_p1      = '--skip-phase1'   in args
-    skip_p2      = '--skip-phase2'   in args
-    skip_p3      = '--skip-phase3'   in args
-    skip_p4      = '--skip-phase4'   in args
+    args         = sys.argv[1:]
+    skip_dataset = '--skip-dataset'    in args
+    skip_p1      = '--skip-phase1'     in args
+    skip_p2      = '--skip-phase2'     in args
+    skip_p3      = '--skip-phase3'     in args
+    skip_p4      = '--skip-phase4'     in args
+    local_p3     = '--local-phase3'    in args
+    skip_upload  = '--skip-upload'     in args
+
+    timeout_min = 120
+    for a in args:
+        if a.startswith('--timeout-minutes='):
+            timeout_min = int(a.split('=')[1])
+
+    # Decide Phase 3 execution mode
+    use_kaggle = (not local_p3) and _kaggle_available()
+    if not skip_p3:
+        if use_kaggle:
+            print("\n  Phase 3 → Kaggle GPU  (use --local-phase3 to run locally)")
+        else:
+            reason = "--local-phase3 flag" if local_p3 else "kaggle CLI not available"
+            print(f"\n  Phase 3 → Local CPU  ({reason})")
 
     steps = []
     if not skip_dataset:
-        steps.append(('build_dataset.py', 'Step 0: Build Dataset'))
+        steps.append(('build_dataset.py', 'Step 0: Build Dataset', None))
     if not skip_p1:
-        steps.append(('train_phase1.py', 'Phase 1: HMM + LightGBM'))
+        steps.append(('train_phase1.py', 'Phase 1: HMM + LightGBM', None))
     if not skip_p2:
-        steps.append(('train_phase2.py', 'Phase 2: SHAP + Conformal'))
+        steps.append(('train_phase2.py', 'Phase 2: SHAP + Conformal', None))
     if not skip_p3:
-        steps.append(('train_phase3.py', 'Phase 3: LSTM + Stacking'))
+        if use_kaggle:
+            p3_extra = [f'--timeout-minutes={timeout_min}']
+            if skip_upload:
+                p3_extra.append('--skip-upload')
+            steps.append(('kaggle_phase3_runner.py',
+                          'Phase 3: LSTM + Stacking (Kaggle GPU)', p3_extra))
+        else:
+            steps.append(('train_phase3.py', 'Phase 3: LSTM + Stacking (local)', None))
     if not skip_p4:
-        steps.append(('train_phase4.py', 'Phase 4: PPO Sizer'))
+        steps.append(('train_phase4.py', 'Phase 4: PPO Sizer', None))
 
     print("\n" + "="*60)
     print("  Dr KKR CPR Screener — Full ML Training Pipeline")
@@ -58,8 +102,8 @@ def main():
     t_start  = time.time()
     results  = []
     failed_at = None
-    for script, label in steps:
-        ok, elapsed = run(script, label)
+    for script, label, extra in steps:
+        ok, elapsed = run(script, label, extra_args=extra)
         results.append((label, ok, elapsed))
         if not ok:
             failed_at = label

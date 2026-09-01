@@ -1381,6 +1381,91 @@ app.get('/api/screen/stream', async (req, res) => {
   res.end();
 });
 
+// ─── TRAINING API ─────────────────────────────────────────────────────────────
+
+const { spawn } = require('child_process');
+
+const PYTHON      = 'C:\\Users\\drkkr\\AppData\\Local\\Programs\\Python\\Python310\\python.exe';
+const RUN_ALL     = path.join(__dirname, 'scripts', 'ml', 'run_all.py');
+const LAST_RUN_F  = path.join(__dirname, 'auto_retrain_cpr.last_run');
+
+let trainJob = { proc: null, status: 'idle', log: [], startedAt: null, exitCode: null };
+
+app.get('/api/train/status', (_req, res) => {
+  let lastRun = null;
+  try { lastRun = fs.readFileSync(LAST_RUN_F, 'utf8').trim(); } catch {}
+  res.json({ status: trainJob.status, startedAt: trainJob.startedAt, lastRun });
+});
+
+app.post('/api/train/start', (req, res) => {
+  if (trainJob.proc) return res.status(409).json({ error: 'Training already running' });
+
+  const skipUpload = req.query.skipUpload === '1';
+  const args = [RUN_ALL, '--skip-dataset'];
+  if (skipUpload) args.push('--skip-upload');
+
+  trainJob = { proc: null, status: 'starting', log: [], startedAt: new Date().toISOString(), exitCode: null };
+
+  const proc = spawn(PYTHON, args, { cwd: __dirname });
+  trainJob.proc = proc;
+  trainJob.status = 'running';
+
+  const pushLine = chunk => {
+    chunk.toString().split(/\r?\n/).forEach(line => {
+      if (line !== undefined) trainJob.log.push(line);
+    });
+  };
+  proc.stdout.on('data', pushLine);
+  proc.stderr.on('data', pushLine);
+
+  proc.on('close', code => {
+    trainJob.status = code === 0 ? 'done' : 'failed';
+    trainJob.proc   = null;
+    trainJob.exitCode = code;
+    if (code === 0) {
+      try { fs.writeFileSync(LAST_RUN_F, new Date().toISOString()); } catch {}
+    }
+  });
+
+  res.json({ started: true });
+});
+
+app.post('/api/train/cancel', (_req, res) => {
+  if (trainJob.proc) {
+    trainJob.proc.kill('SIGTERM');
+    trainJob.status = 'cancelled';
+    trainJob.proc   = null;
+  }
+  res.json({ cancelled: true });
+});
+
+app.get('/api/train/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type':  'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection':    'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const emit = obj => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+
+  let sent = 0;
+  // Flush backlog immediately
+  trainJob.log.slice(0, sent = trainJob.log.length).forEach(line => emit({ line }));
+  emit({ status: trainJob.status, startedAt: trainJob.startedAt });
+
+  const iv = setInterval(() => {
+    while (sent < trainJob.log.length) emit({ line: trainJob.log[sent++] });
+    emit({ status: trainJob.status });
+    if (trainJob.status === 'done' || trainJob.status === 'failed' || trainJob.status === 'cancelled') {
+      clearInterval(iv);
+      if (!res.writableEnded) res.end();
+    }
+  }, 400);
+
+  req.on('close', () => clearInterval(iv));
+});
+
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {

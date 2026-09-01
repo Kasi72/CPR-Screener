@@ -35,6 +35,10 @@ __pycache__/
 dist/
 build/
 
+# Kaggle staging / output temps
+kaggle_p3_stage_*/
+kaggle_p3_out_*/
+
 # OS
 .DS_Store
 Thumbs.db
