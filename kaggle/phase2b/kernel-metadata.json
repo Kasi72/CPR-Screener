@@ -7,7 +7,7 @@
   "is_private": true,
   "enable_gpu": false,
   "enable_internet": true,
-  "dataset_sources": ["drkasi/cpr-screener-phase4-inputs"],
+  "dataset_sources": ["drkasi/cpr-screener-phase2b-inputs"],
   "competition_sources": [],
   "kernel_sources": []
 }

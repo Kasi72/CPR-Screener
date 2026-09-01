@@ -40,6 +40,8 @@ STACKING_PATH  = os.path.join(MODELS_DIR, 'stacking_weights.json')
 PPO_PATH    = os.path.join(MODELS_DIR, 'ppo_policy_weights.json')
 GATE_W_PATH = os.path.join(MODELS_DIR, 'shap_gate_weights.json')
 CONFORMAL_PATH = os.path.join(MODELS_DIR, 'conformal_scores.json')
+LGBM_SCORER_PATH  = os.path.join(MODELS_DIR, 'lgbm_scorer.txt')
+SHAP_WEIGHTS_PATH = os.path.join(MODELS_DIR, 'shap_weights.json')
 
 FEATURES = [
     # original 12
@@ -174,6 +176,21 @@ def load_models():
         with open(PPO_PATH) as f:
             m['ppo_weights'] = json.load(f)
         print("  PPO weights ready.")
+
+    # Phase 2b LightGBM direct signal scorer
+    if os.path.exists(LGBM_SCORER_PATH):
+        try:
+            import lightgbm as lgb_mod
+            m['lgbm_scorer'] = lgb_mod.Booster(model_file=LGBM_SCORER_PATH)
+            print("  Phase2b LGBM scorer ready.")
+        except Exception as e:
+            print(f"  Phase2b LGBM scorer skip: {e}")
+
+    # Phase 2b SHAP feature weights
+    if os.path.exists(SHAP_WEIGHTS_PATH):
+        with open(SHAP_WEIGHTS_PATH) as f:
+            m['shap_weights'] = json.load(f)
+        print("  Phase2b SHAP weights ready.")
 
     # SHAP gate weights
     if os.path.exists(GATE_W_PATH):

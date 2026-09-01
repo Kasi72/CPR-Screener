@@ -1,16 +1,19 @@
 """
 kaggle_phase2b_runner.py — Phase 2b LightGBM HPO Signal Scorer on Kaggle CPU.
 
-Reuses the dataset already uploaded by kaggle_phase4_runner.py
-(drkasi/cpr-screener-phase4-inputs). No upload step needed.
+Uploads signal_dataset.csv to its own dedicated dataset
+(drkasi/cpr-screener-phase2b-inputs), then runs the kernel.
 
 Flow:
-  1. Push kernel   — drkasi/cpr-phase-2b-lgbm-hpo
-  2. Poll status   — wait for complete (default 90 min)
-  3. Download      — lgbm_scorer.txt, shap_weights.json, phase2b_metrics.json
+  1. Upload dataset — drkasi/cpr-screener-phase2b-inputs (dedicated)
+  2. Wait for ready — poll kaggle datasets files
+  3. Push kernel    — drkasi/cpr-phase-2b-lightgbm-hpo-signal-scorer
+  4. Poll status    — wait for complete (default 90 min)
+  5. Download       — lgbm_scorer.txt, shap_weights.json, phase2b_metrics.json
 
 Usage:
     python scripts/ml/kaggle_phase2b_runner.py
+    python scripts/ml/kaggle_phase2b_runner.py --no-upload
     python scripts/ml/kaggle_phase2b_runner.py --timeout-minutes 120
 """
 
@@ -19,8 +22,10 @@ import os, sys, json, time, shutil, subprocess, tempfile, glob, zipfile, argpars
 BASE       = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 KAGGLE_DIR = os.path.join(BASE, 'kaggle', 'phase2b')
 MODELS_DIR = os.path.join(BASE, 'models')
+SIGNAL_CSV = os.path.join(MODELS_DIR, 'signal_dataset.csv')
 
-KERNEL_SLUG = 'drkasi/cpr-phase-2b-lightgbm-hpo-signal-scorer'
+DATASET_SLUG = 'drkasi/cpr-screener-phase2b-inputs'
+KERNEL_SLUG  = 'drkasi/cpr-phase-2b-lightgbm-hpo-signal-scorer'
 
 
 def _run(args, check=True, capture=False):
@@ -35,14 +40,63 @@ def _kaggle(*args, capture=False):
     return _run(['kaggle'] + list(args), capture=capture)
 
 
+def upload_dataset():
+    print('  [1/5] Uploading signal_dataset.csv to Kaggle ...')
+    if not os.path.exists(SIGNAL_CSV):
+        raise FileNotFoundError(f'signal_dataset.csv not found at {SIGNAL_CSV}')
+
+    staging = tempfile.mkdtemp(prefix='kaggle_p2b_stage_')
+    try:
+        meta = {
+            'title': 'CPR Screener Phase 2b Inputs',
+            'id':    DATASET_SLUG,
+            'licenses': [{'name': 'other'}],
+        }
+        with open(os.path.join(staging, 'dataset-metadata.json'), 'w') as f:
+            json.dump(meta, f, indent=2)
+
+        size_mb = os.path.getsize(SIGNAL_CSV) / 1024 ** 2
+        print(f'    Copying signal_dataset.csv ({size_mb:.0f} MB) ...')
+        shutil.copy2(SIGNAL_CSV, os.path.join(staging, 'signal_dataset.csv'))
+
+        r = _kaggle('datasets', 'list', '--search', 'cpr-screener-phase2b-inputs',
+                    '--user', 'drkasi', capture=True)
+        exists = 'cpr-screener-phase2b-inputs' in (r.stdout or '')
+
+        if exists:
+            _kaggle('datasets', 'version', '-p', staging,
+                    '-m', f'Phase2b signal_dataset {time.strftime("%Y-%m-%d %H:%M")}')
+        else:
+            _kaggle('datasets', 'create', '-p', staging)
+
+        print('    Upload submitted. Polling until dataset ready ...')
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def wait_for_dataset_ready(max_wait_s=600):
+    deadline = time.time() + max_wait_s
+    attempt  = 0
+    while time.time() < deadline:
+        attempt += 1
+        r = _run(['kaggle', 'datasets', 'files', DATASET_SLUG], check=False, capture=True)
+        out = (r.stdout or '') + (r.stderr or '')
+        if 'signal_dataset.csv' in out:
+            print(f'    Dataset ready (attempt {attempt}).')
+            return
+        print(f'    [{attempt}] Not ready yet. Waiting 30s ...')
+        time.sleep(30)
+    print(f'    Warning: dataset not confirmed ready after {max_wait_s}s — proceeding anyway.')
+
+
 def push_kernel():
-    print('  [1/3] Pushing Phase 2b kernel ...')
+    print('  [3/5] Pushing Phase 2b kernel ...')
     _kaggle('kernels', 'push', '-p', KAGGLE_DIR)
     print('    Kernel pushed. LightGBM HPO started on Kaggle.')
 
 
 def poll_kernel(timeout_minutes=90):
-    print(f'  [2/3] Polling kernel status (timeout: {timeout_minutes} min) ...')
+    print(f'  [4/5] Polling kernel status (timeout: {timeout_minutes} min) ...')
     deadline = time.time() + timeout_minutes * 60
     start    = time.time()
 
@@ -80,7 +134,7 @@ def poll_kernel(timeout_minutes=90):
 
 
 def download_outputs():
-    print('  [3/3] Downloading Phase 2b outputs ...')
+    print('  [5/5] Downloading Phase 2b outputs ...')
     out_dir = tempfile.mkdtemp(prefix='kaggle_p2b_out_')
     try:
         _kaggle('kernels', 'output', KERNEL_SLUG, '-p', out_dir)
@@ -122,10 +176,16 @@ def download_outputs():
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
-def main(timeout_minutes=90):
+def main(timeout_minutes=90, upload=True):
     print('\n' + '=' * 60)
     print('  Phase 2b: Kaggle LightGBM HPO Runner')
     print('=' * 60)
+
+    if upload:
+        upload_dataset()
+        wait_for_dataset_ready()
+    else:
+        print('  [1/5] Skipping dataset upload (--no-upload flag set).')
 
     push_kernel()
     ok = poll_kernel(timeout_minutes=timeout_minutes)
@@ -139,5 +199,7 @@ def main(timeout_minutes=90):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--timeout-minutes', type=int, default=90)
+    parser.add_argument('--no-upload', action='store_true',
+                        help='Skip dataset upload (reuse existing Kaggle dataset)')
     args = parser.parse_args()
-    main(timeout_minutes=args.timeout_minutes)
+    main(timeout_minutes=args.timeout_minutes, upload=not args.no_upload)

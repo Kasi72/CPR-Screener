@@ -39,7 +39,7 @@ from sklearn.metrics import roc_auc_score
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-INPUT = '/kaggle/input/cpr-screener-phase4-inputs'
+INPUT = '/kaggle/input/cpr-screener-phase2b-inputs'
 WORK  = '/kaggle/working'
 
 FEATURE_COLS = [
