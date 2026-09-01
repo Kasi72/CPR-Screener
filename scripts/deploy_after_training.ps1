@@ -10,12 +10,15 @@ Set-Location $ROOT
 
 # ── 1. Verify expected model files ────────────────────────────────────────────
 $required = @(
-    'models/ppo_policy_weights.json',
-    'models/phase4_metrics.json',
     'models/lgbm_scorer.txt',
     'models/shap_weights.json',
     'models/phase2b_metrics.json'
 )
+# Include Phase 4 models unless watcher signalled to skip (local poller timed out + Kaggle dl also failed)
+if ($env:SKIP_P4_CHECK -ne '1') {
+    $required += 'models/ppo_policy_weights.json'
+    $required += 'models/phase4_metrics.json'
+}
 
 $missing = @()
 foreach ($f in $required) {
