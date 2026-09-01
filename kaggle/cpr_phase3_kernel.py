@@ -327,18 +327,32 @@ def focal_loss_obj(y_pred, dtrain, gamma=2.0, alpha=0.25):
 
 def _load_regime_models(global_lgbm):
     models = {}
+    expected = global_lgbm.num_feature()
     for s in range(4):
         p = os.path.join(MODELS, f'lgbm_regime_{s}.txt')
         if os.path.exists(p):
-            models[s] = lgb.Booster(model_file=p)
+            m = lgb.Booster(model_file=p)
+            if m.num_feature() == expected:
+                models[s] = m
+            else:
+                print(f"    Skipping regime_{s}: {m.num_feature()} features ≠ {expected}")
     return models
+
+
+def _safe_regime_predict(model, global_lgbm, X_sub):
+    """Predict with regime model; fall back to global on feature-count mismatch."""
+    try:
+        return model.predict(X_sub)
+    except Exception:
+        return global_lgbm.predict(X_sub)
 
 
 def _soft_blend(X_tab, dates, posterior_by_date, regime_models, global_lgbm):
     if not regime_models or not posterior_by_date:
         return global_lgbm.predict(X_tab)
     preds = np.stack(
-        [regime_models.get(s, global_lgbm).predict(X_tab) for s in range(4)], axis=1)
+        [_safe_regime_predict(regime_models.get(s, global_lgbm), global_lgbm, X_tab)
+         for s in range(4)], axis=1)
     posts = np.array(
         [posterior_by_date.get(str(d)[:10], [0.25]*4) for d in dates], dtype=np.float32)
     return (posts * preds).sum(axis=1)
@@ -350,7 +364,8 @@ def _hard_route(X_tab, dates, state_by_date, regime_models, global_lgbm):
     for s in range(4):
         mask = states == s
         if not mask.any(): continue
-        probs[mask] = regime_models.get(s, global_lgbm).predict(X_tab[mask])
+        probs[mask] = _safe_regime_predict(
+            regime_models.get(s, global_lgbm), global_lgbm, X_tab[mask])
     probs[states == -1] = global_lgbm.predict(X_tab[states == -1])
     return probs
 
@@ -574,6 +589,22 @@ def main():
         'seq_cols':    SEQUENCE_COLS,
     }, out_lstm)
     print(f"  Saved → {out_lstm}")
+
+    # Ensure lgbm_model feature count matches X_tab (stale models have fewer features)
+    if lgbm_model.num_feature() != X_tab.shape[1]:
+        print(f"  ⚠ Loaded lgbm has {lgbm_model.num_feature()} features, X_tab has {X_tab.shape[1]}.")
+        print("    Retraining lgbm on current feature set for stacking ...")
+        dtrain_full = lgb.Dataset(X_tab, label=y)
+        lgbm_model = lgb.train(
+            {'objective': 'binary', 'metric': 'auc', 'num_leaves': 127,
+             'learning_rate': 0.05, 'min_child_samples': 20,
+             'feature_fraction': 0.8, 'bagging_fraction': 0.8, 'bagging_freq': 5,
+             'verbose': -1, 'n_jobs': -1},
+            dtrain_full, num_boost_round=300,
+        )
+        # Save refreshed model so download_outputs picks it up
+        lgbm_model.save_model(os.path.join(WORK, 'meta_lgbm.txt'))
+        print("    Retrained lgbm saved → meta_lgbm.txt")
 
     # Stacking
     print("\n── Phase 3B: Stacking Meta-Learner ─────────────────────────────")
