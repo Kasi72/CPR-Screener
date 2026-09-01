@@ -224,8 +224,8 @@ def train_ppo(df_train, df_eval):
         eval_env,
         best_model_save_path=WORK,
         log_path=WORK,
-        eval_freq=10_000,
-        n_eval_episodes=10,
+        eval_freq=2_048,      # evaluate after every rollout (~24 evals total)
+        n_eval_episodes=1,    # one pass through eval set is sufficient
         deterministic=True,
         callback_after_eval=stop_cb,
         verbose=1,
