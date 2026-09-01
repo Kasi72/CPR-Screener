@@ -1,0 +1,99 @@
+ 
+============================================================ 
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] KKR_ML_FullRetrain START 
+============================================================ 
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] Updating sector index data... 
+Downloading NSE sector index data...
+  OK   ^NSEI (Nifty50): 1888 rows 2019-01-02 -> 2026-08-27
+  OK   ^CNXIT (IT): 1888 rows 2019-01-01 -> 2026-08-27
+  OK   ^NSEBANK (Bank): 1888 rows 2019-01-01 -> 2026-08-27
+  OK   ^CNXPHARMA (Pharma): 1887 rows 2019-01-01 -> 2026-08-27
+  OK   ^CNXAUTO (Auto): 1844 rows 2019-01-01 -> 2026-07-17
+  OK   ^CNXFMCG (FMCG): 1843 rows 2019-01-01 -> 2026-07-17
+  OK   ^CNXMETAL (Metal): 1844 rows 2019-01-01 -> 2026-07-17
+  OK   ^CNXREALTY (Realty): 1844 rows 2019-01-01 -> 2026-07-17
+  OK   ^CNXENERGY (Energy): 1844 rows 2019-01-01 -> 2026-07-17
+  OK   ^CNXMEDIA (Media): 1844 rows 2019-01-01 -> 2026-07-17
+
+Saved sector data (10 indices) -> D:\Claude code\nse-screener\models\sector_data.pkl
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] Updating bhavcopy delivery data... 
+Launching stealth browser to acquire NSE cookies...
+Traceback (most recent call last):
+  File "D:\Claude code\nse-screener\scripts\ml\download_bhavcopy.py", line 60, in _init_session_playwright
+    browser = pw.chromium.launch(headless=True)
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\site-packages\playwright\sync_api\_generated.py", line 16702, in launch
+    self._sync(
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\site-packages\playwright\_impl\_sync_base.py", line 115, in _sync
+    return task.result()
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\site-packages\playwright\_impl\_browser_type.py", line 97, in launch
+    await self._channel.send(
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\site-packages\playwright\_impl\_connection.py", line 76, in send
+    return await self._connection.wrap_api_call(
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\site-packages\playwright\_impl\_connection.py", line 632, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.Error: BrowserType.launch: Executable doesn't exist at C:\WINDOWS\system32\config\systemprofile\AppData\Local\ms-playwright\chromium_headless_shell-1234\chrome-headless-shell-win64\chrome-headless-shell.exe
+\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
+\u2551 Looks like Playwright was just installed or updated.       \u2551
+\u2551 Please run the following command to download new browsers: \u2551
+\u2551                                                            \u2551
+\u2551     playwright install                                     \u2551
+\u2551                                                            \u2551
+\u2551 <3 Playwright Team                                         \u2551
+\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Claude code\nse-screener\scripts\ml\download_bhavcopy.py", line 278, in <module>
+    download_bhavcopy(start=args.start, end=args.end, delay=args.delay)
+  File "D:\Claude code\nse-screener\scripts\ml\download_bhavcopy.py", line 186, in download_bhavcopy
+    _init_session()
+  File "D:\Claude code\nse-screener\scripts\ml\download_bhavcopy.py", line 95, in _init_session
+    _init_session_playwright()
+  File "D:\Claude code\nse-screener\scripts\ml\download_bhavcopy.py", line 86, in _init_session_playwright
+    print(f"WARN: Playwright session failed ({e})")
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 234-295: character maps to <undefined>
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] WARN: download_bhavcopy.py failed -- continuing with cached data 
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] Starting ML training pipeline... 
+Loading OHLCV data from C:\Users\drkkr\Downloads\NIFTY 500 OHLCV\ALL_SYMBOLS_OHLCV.csv...
+Loaded 578361 rows, 469 symbols
+Sector data: 10 indices loaded (run sector_features.py to update)
+[delivery] Loaded 1792 dates x 4496 symbols
+[pcr] Loaded 618 dates x 206 symbols
+Downloading India VIX (^INDIAVIX)...
+  India VIX: 2118 days loaded (2018-01-01 to 2026-08-27)
+  0/469 -- 360ONE.NS
+  100/469 -- TCS.NS
+  200/469 -- HAL.NS
+  300/469 -- TATAELXSI.NS
+  400/469 -- FIVESTAR.NS
+
+Saved 1394131 signals -> D:\Claude code\nse-screener\models\signal_dataset.csv
+  win     rate: 35.8%   (actual_ret > 0.5%)
+  hit_t1  rate: 29.4%   (full T1 hit)
+  win_rr  rate: 12.7%   (return > 1.5x ATR%)
+  rr_ratio mean: -4.086R
+
+============================================================
+  Dr KKR CPR Screener — Full ML Training Pipeline
+============================================================
+
+============================================================
+  Running: Step 0: Build Dataset
+============================================================
+
+Traceback (most recent call last):
+  File "D:\Claude code\nse-screener\scripts\ml\run_all.py", line 142, in <module>
+    main()
+  File "D:\Claude code\nse-screener\scripts\ml\run_all.py", line 62, in main
+    ok, elapsed = run(script, label)
+  File "D:\Claude code\nse-screener\scripts\ml\run_all.py", line 30, in run
+    print(f"\n  {status}  {label}  [{elapsed/60:.1f} min]")
+  File "C:\Users\drkkr\AppData\Local\Programs\Python\Python310\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 4: character maps to <undefined>
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] FAILED: Exit code 1 
+[~0,4DT:~4,2DT:~6,2DT:~8,2DT:~10,2DT:~12,2] Check log above for error details 
+============================================================ 

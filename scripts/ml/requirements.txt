@@ -1,0 +1,13 @@
+hmmlearn>=0.3.0
+lightgbm>=4.3.0
+shap>=0.44.0
+torch>=2.1.0
+stable-baselines3>=2.2.0
+gymnasium>=0.29.0
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+yfinance>=0.2.36
+scipy>=1.11.0
+xgboost>=2.0.0
+flask>=3.0.0

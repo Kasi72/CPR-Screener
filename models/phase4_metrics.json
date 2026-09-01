@@ -1,0 +1,6 @@
+{
+  "sharpe_full": -3.3392,
+  "sharpe_ppo": -2.9388,
+  "sharpe_delta": 0.4004,
+  "n_test": 209128
+}

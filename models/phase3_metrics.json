@@ -1,0 +1,14 @@
+{
+  "lstm_auc": 0.5029,
+  "xgb_weight": -1.3479501322237528,
+  "lgbm_weight": 1.2412846780875544,
+  "lstm_weight": -5.286213934651074,
+  "regime_weight": 5.701621955519424,
+  "intercept": -0.7411395054171478,
+  "auc_xgb": 0.5343,
+  "auc_lgbm": 0.5463,
+  "auc_lstm": 0.4937,
+  "auc_regime": 0.6157,
+  "auc_stack": 0.6686,
+  "threshold": 0.5
+}

@@ -1,0 +1,44 @@
+{
+  "lgbm": {
+    "auc": 0.5708,
+    "accuracy": 0.6858,
+    "precision": 0.0,
+    "n_signals": 1394181,
+    "n_estimators": 13,
+    "feature_importance": {
+      "dist_hi52": 90723.53,
+      "cpr_width_pct": 84319.43,
+      "dist_lo52": 81830.21,
+      "mom5": 64395.7,
+      "ema200_dist": 45064.68,
+      "rsi14": 33172.24,
+      "market_rs_5d": 21772.92,
+      "sg_vel": 19972.44,
+      "hi52_dir": 18031.81,
+      "market_rs_20d": 16162.77,
+      "atr_pct_rank": 16087.26,
+      "vol_accel": 11584.88,
+      "vol_rank": 10957.68,
+      "vwap_dist": 10905.91,
+      "rsi_dir": 9427.03,
+      "sector_rs_20d": 8916.93,
+      "sector_rs_5d": 8421.98,
+      "conf_vol": 4029.05,
+      "dow": 2408.84,
+      "direction": 1992.73,
+      "rule_id": 1704.86,
+      "n_rules_fired": 0.0,
+      "deliv_pct": 0.0,
+      "pcr": 0.0,
+      "india_vix": 0.0
+    },
+    "regime_aucs": {
+      "Bull-Trend": 0.5597,
+      "Bear-Trend": 0.5936,
+      "Chop": 0.6025,
+      "High-Vol-Panic": 0.5557,
+      "soft_blend": 0.644
+    }
+  },
+  "regime": "High-Vol-Panic"
+}

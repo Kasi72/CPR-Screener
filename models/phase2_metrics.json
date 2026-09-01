@@ -1,0 +1,6 @@
+{
+  "top_gate": "niftyEma",
+  "bot_gate": "poc",
+  "n_cal": 278836,
+  "q90_score": 0.5912
+}

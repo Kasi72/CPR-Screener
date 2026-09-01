@@ -1,0 +1,40 @@
+# Vercel
+.vercel
+
+# Node
+node_modules/
+.env
+.env.*
+
+# Large generated data files
+xgb_features.csv
+xgb_test_signals.csv
+xgb_v2_features.csv
+xgb_v2_signals.csv
+enhanced_trade_returns.csv
+
+# Models: large binary / generated data (exclude; retrain to reproduce)
+models/signal_dataset.csv
+models/delivery_data.pkl
+models/pcr_data.pkl
+models/sector_data.pkl
+models/lstm_model.pt
+models/best_model.zip
+models/ppo_policy.zip
+models/evaluations.npz
+
+# Raw OHLCV data (local path in data_utils.py, not project-owned)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db

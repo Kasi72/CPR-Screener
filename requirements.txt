@@ -1,0 +1,30 @@
+# Core ML stack
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+xgboost>=2.0
+lightgbm>=4.0
+torch>=2.0
+shap>=0.44
+
+# HMM regime model
+hmmlearn>=0.3
+
+# Reinforcement learning (Phase 4 PPO)
+stable-baselines3>=2.2
+gymnasium>=0.29
+
+# Optuna HPO (Phase 1 regime sub-model tuning)
+optuna>=3.4
+
+# Data sources
+yfinance>=0.2
+requests>=2.31
+scipy>=1.11
+
+# Inference server
+flask>=3.0
+
+# Test / one-off download scripts (optional)
+playwright>=1.40
+scrapling>=0.2

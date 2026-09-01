@@ -1,0 +1,12 @@
+Strategy,Trades,WinRate%,ProfitFactor,AvgReturn%,Sharpe
+R1  Cam S3&R3 Inside CPR,273084,51.2,1.12,0.087,0.62
+R2  Narrow CPR,151485,53.0,1.15,0.087,0.74
+R3  Cross Above TC,57965,43.1,0.91,-0.071,-0.49
+R4  Virgin CPR,1330,35.6,1.28,0.113,0.8
+R5  CPR + VWAP Confluence,436565,52.0,1.12,0.081,0.61
+R6  Wide CPR + Cam Extreme,65561,49.6,0.98,-0.013,-0.1
+R7  CPR S/R Flip Retest,178801,55.5,1.3,0.163,1.45
+R8  OR + CPR Aligned,203617,49.6,1.03,0.026,0.17
+R9  Pivot Magnetic Pull,225344,48.3,0.99,-0.007,-0.04
+R10 Price Testing CPR S/R,19241,42.9,0.83,-0.087,-0.99
+R11 VWAP-to-TC Setup,107594,48.2,0.99,-0.006,-0.05

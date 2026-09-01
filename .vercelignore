@@ -1,0 +1,16 @@
+node_modules
+models/
+scripts/
+*.py
+*.bat
+*.ps1
+*.log
+__pycache__/
+backtest_*.py
+backtest_*.csv
+comprehensive_results.*
+exit_analysis.*
+t1_cut_comparison.*
+xgb_*.py
+enhanced_trade_returns.csv
+mfe_mae_optimal_params.csv
