@@ -5,23 +5,26 @@ Usage:
     python scripts/ml/run_all.py [--skip-dataset] [--local-phase3]
 
 Steps:
-    0. build_dataset.py          (re-run backtest to generate signal_dataset.csv)
+    0. build_dataset.py          (re-run backtest — Sprint 1 CPR features + hmm_regime)
     1. train_phase1.py           (HMM + LightGBM)
     2. train_phase2.py           (SHAP gate weights + Conformal calibration)
-   2b. kaggle_phase2b_runner.py  (LightGBM HPO signal scorer — runs on Kaggle CPU)
-    3. kaggle_phase3_runner.py   (LSTM + Stacking — runs on Kaggle T4 GPU)
+   2b. kaggle_phase2b_runner.py  (LightGBM HPO signal scorer — Kaggle CPU)
+   2c. kaggle_phase2c_runner.py  (Regime-conditional LightGBM HPO — Kaggle CPU)
+    3. kaggle_phase3_runner.py   (LSTM + Stacking — Kaggle T4 GPU)
        OR train_phase3.py        (local CPU fallback with --local-phase3)
-    4. kaggle_phase4_runner.py   (PPO position sizing — runs on Kaggle)
+    4. kaggle_phase4_runner.py   (PPO position sizing — Kaggle)
        OR train_phase4.py        (local CPU fallback with --local-phase4)
 
-Phase 2b/3/4 Kaggle flags:
-    --skip-phase2b               Skip Phase 2b (LightGBM HPO — runs on Kaggle)
+Phase 2b/2c/3/4 Kaggle flags:
+    --skip-phase2b               Skip Phase 2b (LightGBM HPO)
+    --skip-phase2c               Skip Phase 2c (Regime-conditional HPO)
     --local-phase3               Force local CPU training for Phase 3
     --local-phase4               Force local CPU training for Phase 4
     --skip-upload                Re-use existing Kaggle dataset for Phase 3
     --timeout-minutes N          Kaggle poll timeout for Phase 3 (default: 120)
     --p4-timeout-minutes N       Kaggle poll timeout for Phase 4 (default: 60)
     --p2b-timeout-minutes N      Kaggle poll timeout for Phase 2b (default: 90)
+    --p2c-timeout-minutes N      Kaggle poll timeout for Phase 2c (default: 120)
 """
 
 import subprocess, sys, os, time, shutil
@@ -64,6 +67,7 @@ def main():
     skip_p1       = '--skip-phase1'     in args
     skip_p2       = '--skip-phase2'     in args
     skip_p2b      = '--skip-phase2b'    in args
+    skip_p2c      = '--skip-phase2c'    in args
     skip_p3       = '--skip-phase3'     in args
     skip_p4       = '--skip-phase4'     in args
     local_p3      = '--local-phase3'    in args
@@ -73,6 +77,7 @@ def main():
     timeout_min     = 120
     p4_timeout_min  = 60
     p2b_timeout_min = 90
+    p2c_timeout_min = 120
     for a in args:
         if a.startswith('--timeout-minutes='):
             timeout_min = int(a.split('=')[1])
@@ -80,10 +85,13 @@ def main():
             p4_timeout_min = int(a.split('=')[1])
         if a.startswith('--p2b-timeout-minutes='):
             p2b_timeout_min = int(a.split('=')[1])
+        if a.startswith('--p2c-timeout-minutes='):
+            p2c_timeout_min = int(a.split('=')[1])
 
     # Decide execution modes
-    kaggle_ok     = _kaggle_available()
+    kaggle_ok      = _kaggle_available()
     use_kaggle_p2b = kaggle_ok and not skip_p2b
+    use_kaggle_p2c = kaggle_ok and not skip_p2c
     use_kaggle_p3  = (not local_p3) and kaggle_ok
     use_kaggle_p4  = (not local_p4) and kaggle_ok
     if not skip_p2b:
@@ -91,6 +99,11 @@ def main():
             print('\n  Phase 2b → Kaggle CPU  (use --skip-phase2b to skip)')
         else:
             print('\n  Phase 2b → SKIPPED  (kaggle CLI not available)')
+    if not skip_p2c:
+        if use_kaggle_p2c:
+            print('\n  Phase 2c → Kaggle CPU  (use --skip-phase2c to skip)')
+        else:
+            print('\n  Phase 2c → SKIPPED  (kaggle CLI not available)')
     if not skip_p3:
         if use_kaggle_p3:
             print("\n  Phase 3 → Kaggle GPU  (use --local-phase3 to run locally)")
@@ -115,6 +128,10 @@ def main():
         p2b_extra = [f'--timeout-minutes={p2b_timeout_min}']
         steps.append(('kaggle_phase2b_runner.py',
                       'Phase 2b: LightGBM HPO Scorer (Kaggle CPU)', p2b_extra))
+    if use_kaggle_p2c:
+        p2c_extra = [f'--timeout-minutes={p2c_timeout_min}']
+        steps.append(('kaggle_phase2c_runner.py',
+                      'Phase 2c: Regime-Conditional HPO (Kaggle CPU)', p2c_extra))
     if not skip_p3:
         if use_kaggle_p3:
             p3_extra = [f'--timeout-minutes={timeout_min}']

@@ -1466,6 +1466,22 @@ app.get('/api/train/stream', (req, res) => {
   req.on('close', () => clearInterval(iv));
 });
 
+// Live price refresh for currently displayed symbols
+app.get('/api/live-prices', async (req, res) => {
+  const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!symbols.length) return res.json({});
+  const results = {};
+  for (const sym of symbols) {
+    try {
+      const bar = await fetchNSEQuoteBar(sym);
+      results[sym] = { price: +bar.close.toFixed(2), high: +bar.high.toFixed(2), low: +bar.low.toFixed(2) };
+    } catch {
+      results[sym] = null;
+    }
+  }
+  res.json(results);
+});
+
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => {

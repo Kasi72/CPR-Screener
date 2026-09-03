@@ -42,6 +42,10 @@ GATE_W_PATH = os.path.join(MODELS_DIR, 'shap_gate_weights.json')
 CONFORMAL_PATH = os.path.join(MODELS_DIR, 'conformal_scores.json')
 LGBM_SCORER_PATH  = os.path.join(MODELS_DIR, 'lgbm_scorer.txt')
 SHAP_WEIGHTS_PATH = os.path.join(MODELS_DIR, 'shap_weights.json')
+# Phase 2c — regime-conditional signal scorer
+LGBM2C_GLOBAL_PATH  = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')
+LGBM2C_REGIME_PATHS = {s: os.path.join(MODELS_DIR, f'lgbm2c_regime_{s}.txt') for s in range(4)}
+SHAP_WEIGHTS2C_PATH = os.path.join(MODELS_DIR, 'shap_weights2c.json')
 
 FEATURES = [
     # original 12
@@ -192,6 +196,27 @@ def load_models():
             m['shap_weights'] = json.load(f)
         print("  Phase2b SHAP weights ready.")
 
+    # Phase 2c — regime-conditional LightGBM scorer (global + per-regime)
+    try:
+        import lightgbm as lgb_mod
+        if os.path.exists(LGBM2C_GLOBAL_PATH):
+            m['lgbm2c_global'] = lgb_mod.Booster(model_file=LGBM2C_GLOBAL_PATH)
+            print("  Phase2c global scorer ready.")
+        p2c_regime = {}
+        for s, path in LGBM2C_REGIME_PATHS.items():
+            if os.path.exists(path):
+                p2c_regime[s] = lgb_mod.Booster(model_file=path)
+        if p2c_regime:
+            m['lgbm2c_regimes'] = p2c_regime
+            print(f"  Phase2c regime scorers ready: {sorted(p2c_regime.keys())}")
+    except Exception as e:
+        print(f"  Phase2c scorers skip: {e}")
+
+    if os.path.exists(SHAP_WEIGHTS2C_PATH):
+        with open(SHAP_WEIGHTS2C_PATH) as f:
+            m['shap_weights2c'] = json.load(f)
+        print("  Phase2c SHAP weights ready.")
+
     # SHAP gate weights
     if os.path.exists(GATE_W_PATH):
         with open(GATE_W_PATH) as f:
@@ -265,11 +290,117 @@ def extract_features(data):
     return np.array(rows, dtype=np.float32)
 
 
+# ── Phase 2c feature extraction ───────────────────────────────────────────────
+
+_P2C_BASE_FEATURES = [
+    'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
+    'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14',
+    'mom5', 'dow', 'rule_id', 'direction',
+    'dist_hi52', 'dist_lo52', 'vol_accel',
+    'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+    'deliv_pct', 'pcr', 'india_vix',
+    'conf_vol', 'rsi_dir', 'hi52_dir',
+    'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
+    'mom3', 'mom10', 'mom20',
+    'rsi_div', 'vol_accel_delta',
+    'days_since_52hi', 'expiry_dist',
+    # Sprint 1 CPR features
+    'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
+    # HMM regime
+    'hmm_regime',
+]  # 41
+
+_P2C_INTERACTION_FEATURES = [
+    'cpr_vol_interaction',
+    'regime_momentum',
+    'cpr_rsi_squeeze',
+    'overlap_vol_signal',
+    'rs_direction_alignment',
+]  # 5
+
+_P2C_ALL_FEATURES = _P2C_BASE_FEATURES + _P2C_INTERACTION_FEATURES  # 46
+
+_P2C_DEFAULTS = {
+    'cpr_overlap_pct':    0.5,
+    'open_to_cpr_dist':   0.0,
+    'prev_cpr_respected': 0.0,
+    'cpr_zone_vol_ratio': 1.0,
+    'hmm_regime':         -1,
+}
+
+
+def _p2c_current_regime():
+    """Return current HMM regime as int (argmax of latest posterior, or -1)."""
+    posterior = models.get('current_posterior')
+    if posterior:
+        return int(np.argmax(posterior))
+    return -1
+
+
+def extract_features_2c(data):
+    """Build 46-feature array for Phase 2c models. Computes interaction features server-side."""
+    if isinstance(data, dict):
+        data = [data]
+
+    current_regime = _p2c_current_regime()
+    rows = []
+    for d in data:
+        # Base features — use existing defaults for original 36, Sprint 1 defaults for new 5
+        vals = {}
+        for f in _P2C_BASE_FEATURES:
+            default = _P2C_DEFAULTS.get(f, _FEATURE_DEFAULTS.get(f, 0.0))
+            vals[f] = float(d.get(f, default))
+
+        # Inject server-side HMM regime if caller didn't send it
+        if vals['hmm_regime'] == -1 and current_regime >= 0:
+            vals['hmm_regime'] = float(current_regime)
+
+        # Direction-adjust signed features (match kernel logic)
+        direction = vals['direction']
+        for col in ('dist_hi52', 'dist_lo52', 'vwap_dist', 'ema200_dist',
+                    'mom3', 'mom5', 'mom10', 'mom20',
+                    'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+                    'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel', 'open_to_cpr_dist'):
+            vals[col] = vals[col] * direction
+
+        # Compute interaction features
+        vals['cpr_vol_interaction']    = (1.0 - min(max(vals['cpr_compress'], 0.0), 1.0)) * vals['vol_rank']
+        vals['regime_momentum']        = max(vals['hmm_regime'], 0) * vals['mom5']
+        vals['cpr_rsi_squeeze']        = (1.0 - min(max(vals['cpr_width_pct'], 0.0), 1.0)) * vals['rsi14'] / 100.0
+        vals['overlap_vol_signal']     = vals['cpr_overlap_pct'] * vals['cpr_zone_vol_ratio']
+        vals['rs_direction_alignment'] = (vals['market_rs_5d'] + vals['sector_rs_5d']) * direction
+
+        rows.append([float(np.nan_to_num(vals.get(f, 0.0))) for f in _P2C_ALL_FEATURES])
+
+    return np.array(rows, dtype=np.float32)
+
+
+def score_lgbm2c(X_2c):
+    """Route each row to its regime-specific Phase 2c model; fall back to global."""
+    global_m   = models.get('lgbm2c_global')
+    regime_map = models.get('lgbm2c_regimes', {})
+
+    if global_m is None:
+        return None
+
+    current_regime = _p2c_current_regime()
+    regime_m = regime_map.get(current_regime)
+
+    if regime_m is not None:
+        # Use regime model for all rows (single-request typical case)
+        scores = regime_m.predict(X_2c)
+    else:
+        scores = global_m.predict(X_2c)
+
+    return np.clip(scores, 0.0, 1.0).astype(np.float32)
+
+
 def _conformal(raw_score: float, alpha: float = 0.10):
     return conformal_interval(raw_score, models.get('conformal'), alpha)
 
 
-def _stacking(xgb_prob, lgbm_prob, lstm_prob=None, regime_hard=None, soft_blend=None):
+def _stacking(xgb_prob, lgbm_prob, lstm_prob=None, regime_hard=None, soft_blend=None,
+              p2b_prob=None, p2c_prob=None):
     return stacking_ensemble(
         xgb_prob, lgbm_prob,
         meta_lgbm=models.get('meta_lgbm'),
@@ -277,6 +408,8 @@ def _stacking(xgb_prob, lgbm_prob, lstm_prob=None, regime_hard=None, soft_blend=
         lstm_prob=lstm_prob,
         regime_hard=regime_hard,
         soft_blend=soft_blend,
+        p2b_prob=p2b_prob,
+        p2c_prob=p2c_prob,
     )
 
 
@@ -336,15 +469,22 @@ def predict_ensemble():
         else:
             soft_preds = lgbm_preds
 
+        # Phase 2c regime-conditional scoring
+        X_2c      = extract_features_2c(data)
+        p2c_preds = score_lgbm2c(X_2c)   # None if models not yet loaded
+
         results = []
         for i, row in enumerate(X):
             xgb_p   = float(np.clip(xgb_preds[i], 0, 1))
             lgbm_p  = float(np.clip(lgbm_preds[i], 0, 1))
             reg_h   = float(np.clip(regime_hard_preds[i], 0, 1))
             soft_v  = float(np.clip(soft_preds[i], 0, 1))
-            stack   = _stacking(xgb_p, lgbm_p, regime_hard=reg_h, soft_blend=soft_v)
+            p2c_v   = float(np.clip(p2c_preds[i], 0, 1)) if p2c_preds is not None else None
+            stack   = _stacking(xgb_p, lgbm_p, regime_hard=reg_h, soft_blend=soft_v,
+                                p2b_prob=lgbm_p, p2c_prob=p2c_v)
             lo, hi  = _conformal(stack)
-            results.append({
+
+            entry = {
                 'xgb_score':    round(xgb_p, 4),
                 'lgbm_score':   round(lgbm_p, 4),
                 'regime_score': round(reg_h, 4),
@@ -352,7 +492,12 @@ def predict_ensemble():
                 'stack_score':  round(stack, 4),
                 'conf_lower':   round(lo, 4),
                 'conf_upper':   round(hi, 4),
-            })
+            }
+            if p2c_preds is not None:
+                entry['lgbm2c_score'] = round(p2c_v, 4)
+                entry['lgbm2c_regime'] = _p2c_current_regime()
+
+            results.append(entry)
         return jsonify({'ensemble': results})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -399,6 +544,7 @@ def health():
         'xgb', 'lgbm', 'lstm', 'hmm', 'stacking',
         'meta_lgbm', 'regime_models', 'current_posterior',
         'ppo_weights', 'gate_weights',
+        'lgbm_scorer', 'lgbm2c_global', 'lgbm2c_regimes', 'shap_weights2c',
     ] if k in models]
     return jsonify({'status': 'ok', 'models_loaded': loaded})
 

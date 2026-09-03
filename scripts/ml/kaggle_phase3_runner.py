@@ -61,11 +61,12 @@ def package_inputs(staging_dir, skip_ohlcv=False):
             f"signal_dataset.csv not found at {SIGNAL_CSV}.\n"
             "Run Step 0 (build_dataset.py) first."
         )
-    lgbm_path = os.path.join(MODELS_DIR, 'lgbm_model.txt')
-    if not os.path.exists(lgbm_path):
+    _p2c = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')
+    _p1  = os.path.join(MODELS_DIR, 'lgbm_model.txt')
+    if not os.path.exists(_p2c) and not os.path.exists(_p1):
         raise FileNotFoundError(
-            f"lgbm_model.txt not found at {lgbm_path}.\n"
-            "Run Phase 1 (train_phase1.py) first."
+            f"No LightGBM model found. Need lgbm2c_global.txt (Phase 2c) "
+            f"or lgbm_model.txt (Phase 1) in {MODELS_DIR}."
         )
 
     # dataset-metadata.json (required by kaggle datasets create/version)
@@ -89,9 +90,12 @@ def package_inputs(staging_dir, skip_ohlcv=False):
     model_files = (
         ['lgbm_model.txt', 'phase1_metrics.json', 'phase2_metrics.json',
          'hmm_params.json', 'hmm_posteriors.json', 'soft_blend_config.json',
-         'conformal_calibration.json', 'gate_weights.json']
-        + [f'lgbm_regime_{s}.txt' for s in range(4)]
-        + [f'lgbm_rule{i}.txt'    for i in range(1, 12)]
+         'conformal_calibration.json', 'gate_weights.json',
+         # Phase 2c regime-conditional models (preferred by train_phase3.py)
+         'lgbm2c_global.txt', 'phase2c_metrics.json', 'shap_weights2c.json']
+        + [f'lgbm_regime_{s}.txt'  for s in range(4)]   # Phase 1 fallback
+        + [f'lgbm2c_regime_{s}.txt' for s in range(4)]  # Phase 2c preferred
+        + [f'lgbm_rule{i}.txt'     for i in range(1, 12)]
     )
     copied = []
     for fn in model_files:
@@ -140,6 +144,25 @@ def upload_dataset(staging_dir):
         _kaggle('datasets', 'create', '-p', staging_dir, '--dir-mode', 'zip')
 
     print("    Dataset upload complete.")
+
+
+# ── Step 2.5: Wait for dataset to be indexed ─────────────────────────────────
+
+def wait_for_dataset_ready(max_wait_s=600):
+    """Poll until Kaggle has indexed the uploaded dataset version."""
+    print("  [2.5] Waiting for dataset to be indexed by Kaggle ...")
+    deadline = time.time() + max_wait_s
+    attempt  = 0
+    while time.time() < deadline:
+        attempt += 1
+        r = _run(['kaggle', 'datasets', 'files', DATASET_SLUG], check=False, capture=True)
+        out = (r.stdout or '') + (r.stderr or '')
+        if 'signal_dataset.csv' in out:
+            print(f"    Dataset ready (attempt {attempt}).")
+            return
+        print(f"    [{attempt}] Not ready yet. Waiting 30s ...")
+        time.sleep(30)
+    print(f"    Warning: dataset not confirmed ready after {max_wait_s}s — proceeding anyway.")
 
 
 # ── Step 3: Push kernel ───────────────────────────────────────────────────────
@@ -231,7 +254,7 @@ def download_outputs():
             if matches:
                 shutil.copy2(matches[0], os.path.join(MODELS_DIR, fn))
                 copied.append(fn)
-                print(f"    ✓ {fn}")
+                print(f"    OK {fn}")
             else:
                 print(f"    ✗ {fn} NOT FOUND in kernel output")
 
@@ -257,8 +280,7 @@ def main(timeout_minutes=120, skip_upload=False):
 
         if not skip_upload:
             upload_dataset(staging_dir)
-            print("  [2.5] Waiting 60s for Kaggle to index the dataset …")
-            time.sleep(60)
+            wait_for_dataset_ready()
         else:
             print("  [2/5] Skipping dataset upload (--skip-upload).")
 

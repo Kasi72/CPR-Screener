@@ -1,0 +1,20 @@
+[{"stream_name":"stdout","time":14.160304094,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":14.1603596,"data":"  CPR Phase 2c: Regime-Conditional LightGBM HPO\n"}
+,{"stream_name":"stdout","time":14.160364953,"data":"============================================================\n"}
+,{"stream_name":"stderr","time":14.160484153,"data":"Traceback (most recent call last):\n"}
+,{"stream_name":"stderr","time":14.160493845,"data":"  File \"/kaggle/src/script.py\", line 396, in \u003cmodule\u003e\n"}
+,{"stream_name":"stderr","time":14.160783333,"data":"    main()\n"}
+,{"stream_name":"stderr","time":14.160797701,"data":"  File \"/kaggle/src/script.py\", line 251, in main\n"}
+,{"stream_name":"stderr","time":14.161059162,"data":"    df = load_data()\n"}
+,{"stream_name":"stderr","time":14.161075101,"data":"         ^^^^^^^^^^^\n"}
+,{"stream_name":"stderr","time":14.161079306,"data":"  File \"/kaggle/src/script.py\", line 105, in load_data\n"}
+,{"stream_name":"stderr","time":14.161237224,"data":"    f\"Contents: {os.listdir(INPUT)}\"\n"}
+,{"stream_name":"stderr","time":14.161281411,"data":"                 ^^^^^^^^^^^^^^^^^\n"}
+,{"stream_name":"stderr","time":14.161329124,"data":"FileNotFoundError: [Errno 2] No such file or directory: '/kaggle/input/cpr-screener-phase2c-inputs'\n"}
+,{"stream_name":"stderr","time":17.369271123,"data":"/usr/local/lib/python3.12/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\\|'\n"}
+,{"stream_name":"stderr","time":17.36931432,"data":"  cells[i][c] = re.sub('\\\\\\\\\\|', '|', cell)\n"}
+,{"stream_name":"stderr","time":17.636737481,"data":"/usr/local/lib/python3.12/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\\_'\n"}
+,{"stream_name":"stderr","time":17.636767305,"data":"  text = re.sub(r'_', '\\_', text) # Escape underscores in display text\n"}
+,{"stream_name":"stderr","time":18.358595292,"data":"[NbConvertApp] Converting notebook __script__.ipynb to html\n"}
+,{"stream_name":"stderr","time":19.400751802,"data":"[NbConvertApp] Writing 351996 bytes to __results__.html\n"}
+]

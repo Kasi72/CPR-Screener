@@ -38,20 +38,33 @@ def stacking_ensemble(
     lstm_prob: Optional[float] = None,
     regime_hard: Optional[float] = None,
     soft_blend: Optional[float] = None,
+    p2b_prob: Optional[float] = None,
+    p2c_prob: Optional[float] = None,
 ) -> float:
     """
     Combine base model scores into a single ensemble probability.
 
     Priority:
-      1. meta_lgbm (LightGBM meta-learner, 5-feature) if available
+      1. meta_lgbm (LightGBM meta-learner) if available
+         - Sprint 4 retrained model expects 7 inputs: xgb/lgb/lstm/regime/soft/p2b/p2c
+         - Pre-Sprint-4 model (5 inputs) still works via num_feature() check
       2. logistic regression fallback from stacking_weights.json
       3. simple average
     """
     if meta_lgbm is not None:
-        lstm_v = lstm_prob if lstm_prob is not None else (xgb_prob + lgbm_prob) / 2
-        reg_h  = regime_hard if regime_hard is not None else lgbm_prob
-        soft_v = soft_blend if soft_blend is not None else reg_h
-        meta_X = np.array([[xgb_prob, lgbm_prob, lstm_v, reg_h, soft_v]], dtype=np.float32)
+        lstm_v  = lstm_prob   if lstm_prob   is not None else (xgb_prob + lgbm_prob) / 2
+        reg_h   = regime_hard if regime_hard is not None else lgbm_prob
+        soft_v  = soft_blend  if soft_blend  is not None else reg_h
+        p2b_v   = p2b_prob    if p2b_prob    is not None else (xgb_prob + lgbm_prob) / 2
+        p2c_v   = p2c_prob    if p2c_prob    is not None else p2b_v
+
+        n_feat = meta_lgbm.num_feature()
+        if n_feat >= 7:
+            meta_X = np.array([[xgb_prob, lgbm_prob, lstm_v, reg_h, soft_v, p2b_v, p2c_v]],
+                               dtype=np.float32)
+        else:
+            # Pre-Sprint-4 model (5 inputs) — backward compat
+            meta_X = np.array([[xgb_prob, lgbm_prob, lstm_v, reg_h, soft_v]], dtype=np.float32)
         return float(meta_lgbm.predict(meta_X)[0])
 
     sw = stacking_weights

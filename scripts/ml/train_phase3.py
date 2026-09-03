@@ -237,13 +237,17 @@ def focal_loss_obj(y_pred, dtrain, gamma=2.0, alpha=0.25):
 # ─────────────────────── Stacking Meta-Learner ───────────────────────────────
 
 def _load_regime_lgbm_models():
-    """Load per-regime LightGBM sub-models trained in Phase 1."""
+    """Load per-regime LightGBM sub-models. Prefers Phase 2c models, falls back to Phase 1."""
     models = {}
     for state in range(4):
-        path = os.path.join(MODELS_DIR, f'lgbm_regime_{state}.txt')
-        if os.path.exists(path):
+        # Phase 2c regime-conditional models take priority
+        p2c = os.path.join(MODELS_DIR, f'lgbm2c_regime_{state}.txt')
+        p1  = os.path.join(MODELS_DIR, f'lgbm_regime_{state}.txt')
+        path = p2c if os.path.exists(p2c) else (p1 if os.path.exists(p1) else None)
+        if path:
             models[state] = lgb.Booster(model_file=path)
-    return models   # may be empty if Phase 1 didn't produce them
+            print(f"    Regime {state}: loaded {os.path.basename(path)}")
+    return models
 
 
 def _regime_lgbm_probs(X_tab, dates, state_by_date, regime_models, global_lgbm):
@@ -494,7 +498,12 @@ def main():
     print("=" * 60)
     print(f"  Device: {DEVICE}")
 
-    lgbm_model = lgb.Booster(model_file=os.path.join(MODELS_DIR, 'lgbm_model.txt'))
+    # Prefer Phase 2c global model; fall back to Phase 1
+    _p2c_global = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')
+    _p1_global  = os.path.join(MODELS_DIR, 'lgbm_model.txt')
+    _lgbm_path  = _p2c_global if os.path.exists(_p2c_global) else _p1_global
+    print(f"  Loading global LightGBM: {os.path.basename(_lgbm_path)}")
+    lgbm_model = lgb.Booster(model_file=_lgbm_path)
 
     # Load signal dataset
     df_sig = load_signal_dataset()

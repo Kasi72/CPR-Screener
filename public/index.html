@@ -1456,6 +1456,7 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
     <div id="filterChips" style="display:contents"></div>
     <button id="clearAllFiltersBtn" class="clear-filters-btn" onclick="App.clearAllColFilters()" style="display:none">✕ Clear Filters</button>
     <div class="spacer"></div>
+    <button id="refreshPricesBtn" class="export-btn" onclick="App.refreshPrices()" style="display:none" title="Fetch latest prices from NSE">↻ Refresh Prices</button>
     <button class="export-btn" onclick="App.exportCSV()">⬇ CSV</button>
   </div>
 
@@ -2222,6 +2223,7 @@ const App = {
     $('emptyState').style.display = 'none';
     $('resultsTable').style.display = '';
     $('tableBody').innerHTML = '';
+    $('refreshPricesBtn').style.display = 'none';
     $('progressWrap').style.display = '';
     $('progressFill').style.width = '0%';
     this.updateStats(0, 0, 0, 0);
@@ -2297,6 +2299,7 @@ const App = {
           State.isRunning = false;
           runBtn.disabled = false;
           runText.textContent = '▶ Run Screener';
+          $('refreshPricesBtn').style.display = msg.matched > 0 ? '' : 'none';
           $('progressWrap').style.display = 'none';
           const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
           this.updateStats(msg.total, msg.matched, State.errors, elapsed);
@@ -2572,6 +2575,52 @@ const App = {
 
     if (data.length === 0 && State.results.length > 0) {
       tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--t3)">No results match current filters</td></tr>`;
+    }
+  },
+
+  async refreshPrices() {
+    if (!State.results.length) return;
+    const btn = $('refreshPricesBtn');
+    btn.disabled = true;
+    btn.textContent = '↻ Refreshing…';
+    const symbols = State.results.map(s => s.symbol);
+    try {
+      const res = await fetch(`/api/live-prices?symbols=${symbols.join(',')}`);
+      const data = await res.json();
+      let updated = 0;
+      for (const stock of State.results) {
+        const live = data[stock.symbol];
+        if (!live) continue;
+        const prevClose = stock.prevClose || stock.price;
+        stock.price  = live.price;
+        stock.change = +((live.price - prevClose) / prevClose * 100).toFixed(2);
+        stock.pricePosition = live.price > stock.cpr.upper ? 'above'
+                            : live.price < stock.cpr.lower ? 'below' : 'inside';
+        // Update DOM in-place
+        const tr = document.querySelector(`tr[data-sym="${stock.symbol}"]`);
+        if (!tr) continue;
+        const chgClass = stock.change >= 0 ? 'pos' : 'neg';
+        const chgSign  = stock.change >= 0 ? '+' : '';
+        const pm = tr.querySelector('.price-main');
+        if (pm) pm.textContent = `₹${stock.price.toFixed(2)}`;
+        tr.querySelectorAll('.price-chg').forEach(el => {
+          el.className = `price-chg ${chgClass}`;
+          el.textContent = `${chgSign}${stock.change}%`;
+        });
+        const badge = tr.querySelector('.pos-badge');
+        if (badge) {
+          badge.className = `pos-badge ${stock.pricePosition}`;
+          badge.textContent = stock.pricePosition.toUpperCase();
+        }
+        updated++;
+      }
+      const ts = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+      toast(`Prices updated (${updated} symbols) at ${ts}`);
+    } catch(e) {
+      toast('Price refresh failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '↻ Refresh Prices';
     }
   },
 

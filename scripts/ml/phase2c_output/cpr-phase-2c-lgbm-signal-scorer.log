@@ -1,0 +1,62 @@
+[{"stream_name":"stdout","time":18.553323797,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":18.553408051,"data":"  CPR Phase 2c: Regime-Conditional LightGBM HPO\n"}
+,{"stream_name":"stdout","time":18.553415016,"data":"============================================================\n"}
+,{"stream_name":"stdout","time":18.559435454,"data":"Found dataset at: /kaggle/input/datasets/drkasi/cpr-screener-phase2c-inputs/signal_dataset.csv\n"}
+,{"stream_name":"stdout","time":18.559469119,"data":"Loading /kaggle/input/datasets/drkasi/cpr-screener-phase2c-inputs/signal_dataset.csv ...\n"}
+,{"stream_name":"stdout","time":22.025000696,"data":"  240,545 rows, ['date', 'symbol', 'rule_id', 'direction', 'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank', 'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14', 'mom5', 'dow', 'dist_hi52', 'dist_lo52', 'vol_accel', 'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d', 'deliv_pct', 'pcr', 'india_vix', 'conf_vol', 'rsi_dir', 'hi52_dir', 'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1', 'mom3', 'mom10', 'mom20', 'rsi_div', 'vol_accel_delta', 'days_since_52hi', 'expiry_dist', 'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio', 'atr_pct', 'actual_return', 'win', 'hit_t1', 'hit_t3', 'win_rr', 'rr_ratio', 'hmm_regime']\n"}
+,{"stream_name":"stdout","time":22.407531932,"data":"  Target selected: hit_t1  (rate=25.9%)\n"}
+,{"stream_name":"stdout","time":22.408024474,"data":"  Train=168,381  Val=36,081  Test=36,083\n"}
+,{"stream_name":"stdout","time":22.408045381,"data":"  HPO subsample: 168,381\n"}
+,{"stream_name":"stdout","time":22.563487922,"data":"\n"}
+,{"stream_name":"stdout","time":22.563523983,"data":"[1/2] Global model HPO...\n"}
+,{"stream_name":"stdout","time":22.563529543,"data":"  Optuna HPO (100 trials, 5-fold TS-CV) [global]...\n"}
+,{"stream_name":"stdout","time":2712.923440554,"data":"  Best CV AUC (global): 0.7425\n"}
+,{"stream_name":"stdout","time":2719.014455637,"data":"[200]\tvalid_0's auc: 0.75323\n"}
+,{"stream_name":"stdout","time":2720.070787154,"data":"    Val AUC: 0.7539\n"}
+,{"stream_name":"stdout","time":2720.345657829,"data":"  Global test AUC: 0.7333\n"}
+,{"stream_name":"stdout","time":2720.351527345,"data":"  Saved -\u003e /kaggle/working/lgbm2c_global.txt\n"}
+,{"stream_name":"stdout","time":2721.420425825,"data":"\n"}
+,{"stream_name":"stdout","time":2721.420727662,"data":"[2/2] Per-regime models...\n"}
+,{"stream_name":"stdout","time":2721.42247306,"data":"\n"}
+,{"stream_name":"stdout","time":2721.422681342,"data":"  Regime 0: 42,367 train samples\n"}
+,{"stream_name":"stdout","time":2721.489005472,"data":"  Optuna HPO (50 trials, 5-fold TS-CV) [regime_0]...\n"}
+,{"stream_name":"stdout","time":2957.518099433,"data":"  Best CV AUC (regime_0): 0.7166\n"}
+,{"stream_name":"stdout","time":2960.152039241,"data":"    Val AUC: 0.7503\n"}
+,{"stream_name":"stdout","time":2960.252434693,"data":"  Saved -\u003e /kaggle/working/lgbm2c_regime_0.txt\n"}
+,{"stream_name":"stdout","time":2962.476202447,"data":"\n"}
+,{"stream_name":"stdout","time":2962.476251067,"data":"  Regime 1: 58,928 train samples\n"}
+,{"stream_name":"stdout","time":2962.54476841,"data":"  Optuna HPO (50 trials, 5-fold TS-CV) [regime_1]...\n"}
+,{"stream_name":"stdout","time":3298.242845697,"data":"  Best CV AUC (regime_1): 0.7289\n"}
+,{"stream_name":"stderr","time":3298.536760651,"data":"Traceback (most recent call last):\n"}
+,{"stream_name":"stderr","time":3298.53684948,"data":"  File \"/kaggle/src/script.py\", line 398, in \u003cmodule\u003e\n"}
+,{"stream_name":"stderr","time":3298.537132802,"data":"    main()\n"}
+,{"stream_name":"stderr","time":3298.537354723,"data":"  File \"/kaggle/src/script.py\", line 348, in main\n"}
+,{"stream_name":"stderr","time":3298.537575227,"data":"    model_r, val_r = train_final(Xr_tr, yr_tr, Xr_va, yr_va, bp_r)\n"}
+,{"stream_name":"stderr","time":3298.537972482,"data":"                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"}
+,{"stream_name":"stderr","time":3298.537999718,"data":"  File \"/kaggle/src/script.py\", line 217, in train_final\n"}
+,{"stream_name":"stderr","time":3298.538300689,"data":"    model.fit(X_tr, y_tr,\n"}
+,{"stream_name":"stderr","time":3298.538309467,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/sklearn.py\", line 1560, in fit\n"}
+,{"stream_name":"stderr","time":3298.538852661,"data":"    super().fit(\n"}
+,{"stream_name":"stderr","time":3298.53886495,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/sklearn.py\", line 1049, in fit\n"}
+,{"stream_name":"stderr","time":3298.539291674,"data":"    self._Booster = train(\n"}
+,{"stream_name":"stderr","time":3298.539299349,"data":"                    ^^^^^^\n"}
+,{"stream_name":"stderr","time":3298.539461796,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/engine.py\", line 301, in train\n"}
+,{"stream_name":"stderr","time":3298.539672494,"data":"    booster.add_valid(valid_set, name_valid_set)\n"}
+,{"stream_name":"stderr","time":3298.539712168,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/basic.py\", line 4058, in add_valid\n"}
+,{"stream_name":"stderr","time":3298.540659177,"data":"    data.construct()._handle,\n"}
+,{"stream_name":"stderr","time":3298.540755302,"data":"    ^^^^^^^^^^^^^^^^\n"}
+,{"stream_name":"stderr","time":3298.540760401,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/basic.py\", line 2539, in construct\n"}
+,{"stream_name":"stderr","time":3298.541454323,"data":"    self._lazy_init(\n"}
+,{"stream_name":"stderr","time":3298.54146964,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/basic.py\", line 2123, in _lazy_init\n"}
+,{"stream_name":"stderr","time":3298.542069986,"data":"    data, feature_name, categorical_feature, self.pandas_categorical = _data_from_pandas(\n"}
+,{"stream_name":"stderr","time":3298.542171128,"data":"                                                                       ^^^^^^^^^^^^^^^^^^\n"}
+,{"stream_name":"stderr","time":3298.542227957,"data":"  File \"/usr/local/lib/python3.12/dist-packages/lightgbm/basic.py\", line 834, in _data_from_pandas\n"}
+,{"stream_name":"stderr","time":3298.542531633,"data":"    raise ValueError(\"Input data must be 2 dimensional and non empty.\")\n"}
+,{"stream_name":"stderr","time":3298.542551369,"data":"ValueError: Input data must be 2 dimensional and non empty.\n"}
+,{"stream_name":"stderr","time":3302.428224132,"data":"/usr/local/lib/python3.12/dist-packages/mistune.py:435: SyntaxWarning: invalid escape sequence '\\|'\n"}
+,{"stream_name":"stderr","time":3302.428275212,"data":"  cells[i][c] = re.sub('\\\\\\\\\\|', '|', cell)\n"}
+,{"stream_name":"stderr","time":3302.773144992,"data":"/usr/local/lib/python3.12/dist-packages/nbconvert/filters/filter_links.py:36: SyntaxWarning: invalid escape sequence '\\_'\n"}
+,{"stream_name":"stderr","time":3302.773186956,"data":"  text = re.sub(r'_', '\\_', text) # Escape underscores in display text\n"}
+,{"stream_name":"stderr","time":3303.688245238,"data":"[NbConvertApp] Converting notebook __script__.ipynb to html\n"}
+,{"stream_name":"stderr","time":3304.818392716,"data":"[NbConvertApp] Writing 351882 bytes to __results__.html\n"}
+]

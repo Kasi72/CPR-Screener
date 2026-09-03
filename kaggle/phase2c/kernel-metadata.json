@@ -1,0 +1,16 @@
+{
+  "id": "drkasi/cpr-phase-2c-lgbm-signal-scorer",
+  "title": "cpr phase 2c lgbm signal scorer",
+  "code_file": "cpr_phase2c_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [
+    "drkasi/cpr-screener-phase2c-inputs"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

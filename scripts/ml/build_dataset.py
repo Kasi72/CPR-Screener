@@ -11,11 +11,18 @@ Columns: date, symbol, rule_id, direction, cpr_width_pct, vwap_dist,
           rsi14, mom5, dow, actual_return, atr_pct,
           win (1/0),
           hit_t1  (1/0)  -- T1 hit (return >= 90% of PROFIT_TARGET),
-          win_rr  (1/0)  -- risk-adjusted win (return > 1.5x ATR%),
-          rr_ratio (float) -- R-multiple (actual_return / TRAIL_STOP)
+          hit_t3  (1/0)  -- T1 hit within 3 days (multi-day label),
+          win_rr  (1/0)  -- risk-adjusted win (return > 0.8x ATR%),
+          rr_ratio (float) -- R-multiple (actual_return / TRAIL_STOP),
+          --- Sprint 1 CPR features ---
+          cpr_overlap_pct    -- overlap between today/yesterday CPR bands [0,1]
+          open_to_cpr_dist   -- direction-adj (entry - cpr_pivot) / ATR
+          prev_cpr_respected -- 1 if price touched CPR but didn't break in last 3 days
+          cpr_zone_vol_ratio -- proxy vol traded within CPR zone (prev bar overlap × vol_rank)
+          hmm_regime         -- HMM market regime 0-3 (from hmm_posteriors.json, -1 if absent)
 """
 
-import os, sys, warnings
+import os, sys, warnings, json
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -125,6 +132,12 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
 
     # Build a Series for RS computation (date-indexed)
     sym_close_series = pd.Series(closes, index=pd.DatetimeIndex(dates))
+
+    # Precompute CPR width per bar for 252-day percentile feature (once per symbol)
+    _all_cpr_widths = np.array([
+        calc_cpr(highs[j], lows[j], closes[j])['width_pct']
+        for j in range(len(df) - 1)
+    ], dtype=np.float32)
 
     rows = []
     for i in range(30, len(df) - MAX_HOLD - 1):
@@ -281,6 +294,121 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         # ATR as % of current close -- used for risk-adjusted label
         atr_pct = float(cur_atr / cur_close) if cur_close > 0 else 0.001
 
+        # --- Sprint 1: New CPR features (per-bar, direction-independent) ---
+
+        # 1. CPR overlap with yesterday's CPR bands
+        if i >= 2:
+            cpr_prev2    = calc_cpr(highs[i-2], lows[i-2], closes[i-2])
+            overlap_abs  = max(0.0, min(cpr['upper'], cpr_prev2['upper'])
+                                   - max(cpr['lower'], cpr_prev2['lower']))
+            cpr_overlap_pct = float(np.clip(
+                overlap_abs / max(cpr['width'], 0.0001), 0.0, 1.0))
+        else:
+            cpr_overlap_pct = 0.5
+
+        # 2. Volume-in-CPR-zone proxy: prev bar's H-L overlap with CPR × vol_rank
+        prev_range       = max(highs[i-1] - lows[i-1], 0.001)
+        cpr_bar_overlap  = max(0.0, min(highs[i-1], cpr['upper'])
+                                    - max(lows[i-1], cpr['lower']))
+        cpr_zone_vol_ratio = float(np.clip(
+            (cpr_bar_overlap / prev_range) * vol_rank, 0.0, 5.0))
+
+        # 3. Previous CPR respected: price touched CPR in last 3 days but didn't close through
+        prev_cpr_respected = 0.0
+        for _j in range(max(1, i - 3), i):
+            _cpj     = calc_cpr(highs[_j-1], lows[_j-1], closes[_j-1])
+            _touched = lows[_j] <= _cpj['upper'] and highs[_j] >= _cpj['lower']
+            _broke   = (_cpj['width'] > 0 and
+                        abs(closes[_j] - _cpj['pivot']) > _cpj['width'] * 1.5)
+            if _touched and not _broke:
+                prev_cpr_respected = 1.0
+                break
+
+        # --- Sprint 2: High-lift CPR features (shared 20-day lookback) ---
+
+        # One pass: CPR data for last 20 bars + today
+        _lb_start = max(1, i - 19)
+        _cpr_lb   = []
+        for _j in range(_lb_start, i + 1):
+            _c = calc_cpr(highs[_j-1], lows[_j-1], closes[_j-1])
+            _cpr_lb.append({'width_pct': _c['width_pct'], 'upper': _c['upper'],
+                            'lower': _c['lower'],
+                            'mid': (_c['upper'] + _c['lower']) / 2.0})
+        # _cpr_lb[-1] = today's CPR (matches `cpr`)
+
+        # 5. open_inside_cpr: today's open between BC and TC
+        open_inside_cpr = 1.0 if cpr['lower'] <= opens[i] <= cpr['upper'] else 0.0
+
+        # 6. cpr_virgin: no bar in last 20 days touched today's CPR zone
+        cpr_virgin = 1.0
+        for _j in range(max(0, i - 20), i):
+            if lows[_j] <= cpr['upper'] and highs[_j] >= cpr['lower']:
+                cpr_virgin = 0.0
+                break
+
+        # 7. consecutive_narrow_cprs: streak of CPR widths below 20-day median
+        _widths_hist = [x['width_pct'] for x in _cpr_lb[:-1]]
+        _median_w    = float(np.median(_widths_hist)) if _widths_hist else cpr_w
+        _consec      = 0
+        for _x in reversed(_widths_hist):
+            if _x < _median_w:
+                _consec += 1
+            else:
+                break
+        consecutive_narrow_cprs = float(min(_consec, 10))
+
+        # 8. cpr_midpoint_trend: 5-day slope of midpoints / ATR
+        _mids = [x['mid'] for x in _cpr_lb[-6:-1]]
+        if len(_mids) >= 2:
+            _x_arr = np.arange(len(_mids), dtype=np.float32)
+            _slope = float(np.polyfit(_x_arr, _mids, 1)[0])
+            cpr_midpoint_trend = float(np.clip(_slope / max(cur_atr, 0.001), -5.0, 5.0))
+        else:
+            cpr_midpoint_trend = 0.0
+
+        # 9. cpr_expansion_factor: today's CPR width / yesterday's
+        if len(_cpr_lb) >= 2:
+            cpr_expansion_factor = float(np.clip(
+                cpr_w / max(_cpr_lb[-2]['width_pct'], 0.001), 0.1, 10.0))
+        else:
+            cpr_expansion_factor = 1.0
+
+        # --- Sprint 2 (Part B): structural + context CPR features ---
+
+        # 10. cpr_above_prev_cpr: today's BC > yesterday's TC (bullish CPR structure gap)
+        if len(_cpr_lb) >= 2:
+            cpr_above_prev_cpr = 1.0 if cpr['lower'] > _cpr_lb[-2]['upper'] else 0.0
+        else:
+            cpr_above_prev_cpr = 0.0
+
+        # 11. prev_close_inside_cpr: yesterday's close inside today's CPR (indecision → explosion)
+        prev_close_inside_cpr = 1.0 if cpr['lower'] <= closes[i-1] <= cpr['upper'] else 0.0
+
+        # 12. atr_to_cpr_ratio: ATR% / CPR_width% (elastic-band breakout ratio)
+        atr_to_cpr_ratio = float(np.clip(atr_pct / max(cpr_w, 0.001), 0.1, 20.0))
+
+        # 13. cpr_width_percentile_252d: 1 = narrowest (max compression), 0 = widest
+        _w252 = _all_cpr_widths[max(0, i - 252): i]
+        cpr_width_percentile_252d = float(1.0 - np.mean(_w252 <= cpr_w)) if len(_w252) > 5 else 0.5
+
+        # 14. prev_day_ochoa_type: Frank Ochoa day classification for yesterday
+        #     0=Trend (close beyond R1/S1), 1=Normal, 2=Neutral (inside CPR), 3=Outside (wide range)
+        if i >= 2:
+            _cpr_pd   = calc_cpr(highs[i-2], lows[i-2], closes[i-2])
+            _prev_atr = atr(highs[max(0, i-15):i-1], lows[max(0, i-15):i-1], closes[max(0, i-15):i-1])
+            _prev_rng = highs[i-1] - lows[i-1]
+            _pc       = closes[i-1]
+            if _pc > _cpr_pd['r1'] or _pc < _cpr_pd['s1']:
+                prev_day_ochoa_type = 0
+            elif _cpr_pd['lower'] <= _pc <= _cpr_pd['upper']:
+                prev_day_ochoa_type = 2
+            elif _prev_rng > max(_prev_atr, 0.001) * 1.5:
+                prev_day_ochoa_type = 3
+            else:
+                prev_day_ochoa_type = 1
+        else:
+            prev_day_ochoa_type = 1
+
         for rid in fired:
             direction  = get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl)
             # Tier 1 interaction features that depend on direction
@@ -288,13 +416,22 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
             hi52_dir = dist_hi52 * direction
             actual_ret = asymmetric_exit(direction, entry, fh, fl, fc) if entry > 0 else 0.0
 
+            # 4. Open-to-CPR distance (direction-adjusted: + = opened on favorable side)
+            open_to_cpr_dist = float(np.clip(
+                (entry - cpr['pivot']) / max(cur_atr, 0.001) * direction,
+                -5.0, 5.0))
+
             # --- Label definitions ---
             # win     : any positive move > 0.5% (legacy, kept for backward compat)
             # hit_t1  : full breakout to PROFIT_TARGET (cleanest signal)
-            # win_rr  : return beats 1.5x ATR% (normalised across volatility regimes)
+            # hit_t3  : T1 hit within 3 days (multi-day, less noise)
+            # win_rr  : return beats 0.8x ATR% (normalised across volatility regimes)
             # rr_ratio: R-multiple relative to initial stop (continuous target)
             hit_t1  = 1 if actual_ret >= PROFIT_TARGET * 0.90 else 0
-            win_rr  = 1 if actual_ret / max(atr_pct, 0.001) > 0.8 else 0  # was 1.5 — too high vs T1 cap
+            hit_t3  = 1 if (len(fc) >= 3 and
+                            asymmetric_exit(direction, entry, fh[:3], fl[:3], fc[:3])
+                            >= PROFIT_TARGET * 0.90) else 0
+            win_rr  = 1 if actual_ret / max(atr_pct, 0.001) > 0.8 else 0
             rr_ratio = round(actual_ret / TRAIL_STOP, 4)
 
             rows.append({
@@ -347,11 +484,29 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
                 # --- Tier 2D: context ---
                 'days_since_52hi': days_since_52hi,
                 'expiry_dist':   expiry_dist,
+                # --- Sprint 1: new CPR alpha features ---
+                'cpr_overlap_pct':    round(cpr_overlap_pct, 4),
+                'open_to_cpr_dist':   round(open_to_cpr_dist, 4),
+                'prev_cpr_respected': int(prev_cpr_respected),
+                'cpr_zone_vol_ratio': round(cpr_zone_vol_ratio, 4),
+                # --- Sprint 2A: compression/structure CPR features ---
+                'open_inside_cpr':             int(open_inside_cpr),
+                'cpr_virgin':                  int(cpr_virgin),
+                'consecutive_narrow_cprs':     consecutive_narrow_cprs,
+                'cpr_midpoint_trend':          round(cpr_midpoint_trend, 4),
+                'cpr_expansion_factor':        round(cpr_expansion_factor, 4),
+                # --- Sprint 2B: structural + context CPR features ---
+                'cpr_above_prev_cpr':          int(cpr_above_prev_cpr),
+                'prev_close_inside_cpr':       int(prev_close_inside_cpr),
+                'atr_to_cpr_ratio':            round(atr_to_cpr_ratio, 4),
+                'cpr_width_percentile_252d':   round(cpr_width_percentile_252d, 4),
+                'prev_day_ochoa_type':         prev_day_ochoa_type,
                 # --- labels ---
                 'atr_pct':       round(atr_pct, 6),
                 'actual_return': actual_ret,
                 'win':           1 if actual_ret > 0.005 else 0,
                 'hit_t1':        hit_t1,
+                'hit_t3':        hit_t3,
                 'win_rr':        win_rr,
                 'rr_ratio':      rr_ratio,
             })
@@ -409,8 +564,30 @@ def main():
     except Exception as e:
         print(f"  India VIX download failed ({e}) — using neutral 15.0 for all signals")
 
-    all_rows = []
-    symbols  = df_all['Symbol'].unique()
+    # --- Sprint 1: load HMM posteriors once for regime assignment ---
+    posteriors_path = os.path.join(MODELS_DIR, 'hmm_posteriors.json')
+    regime_map = {}
+    if os.path.exists(posteriors_path):
+        with open(posteriors_path) as f:
+            posteriors = json.load(f)
+        _regime_series = pd.Series(
+            {d: int(np.argmax(v)) for d, v in posteriors.items()},
+            dtype='int8',
+        )
+        _regime_series.index = pd.to_datetime(_regime_series.index)
+        _regime_series = _regime_series.sort_index()
+        regime_map = _regime_series   # pd.Series for ffill lookup below
+        print(f"  HMM posteriors loaded: {len(regime_map)} dates")
+    else:
+        regime_map = None
+        print("  hmm_posteriors.json not found — hmm_regime = -1 (neutral).")
+
+    # Stream rows directly to CSV to avoid accumulating 1.4M dicts in RAM
+    out  = os.path.join(MODELS_DIR, 'signal_dataset.csv')
+    symbols      = df_all['Symbol'].unique()
+    total_rows   = 0
+    header_done  = False
+
     for i, sym in enumerate(symbols):
         if i % 100 == 0:
             print(f"  {i}/{len(symbols)} -- {sym}")
@@ -421,16 +598,149 @@ def main():
                                           pcr_pivot=pcr_pivot,
                                           market_pcr=market_pcr,
                                           vix_dict=vix_dict)
-        all_rows.extend(rows)
+        if not rows:
+            continue
 
-    df_signals = pd.DataFrame(all_rows)
-    out = os.path.join(MODELS_DIR, 'signal_dataset.csv')
-    df_signals.to_csv(out, index=False)
-    print(f"\nSaved {len(df_signals)} signals -> {out}")
+        chunk = pd.DataFrame(rows)
+        if regime_map is not None:
+            dates_dt = pd.to_datetime(chunk['date'])
+            # reindex to signal dates; ffill fills yfinance gaps (max 5 days)
+            chunk['hmm_regime'] = (
+                regime_map.reindex(dates_dt, method='ffill', tolerance=pd.Timedelta('5D'))
+                .fillna(-1).astype(int).values
+            )
+        else:
+            chunk['hmm_regime'] = -1
+
+        chunk.to_csv(out, mode='w' if not header_done else 'a',
+                     header=not header_done, index=False)
+        header_done = True
+        total_rows += len(chunk)
+
+    # Read back for summary stats and Phase 2b/2c score injection (Sprint 4)
+    print("\nReading CSV back for meta-feature injection ...")
+    df_signals = pd.read_csv(out, low_memory=False)
+    print(f"\nSaved {total_rows} signals -> {out}")
+    print(f"  HMM regime dist: {df_signals['hmm_regime'].value_counts().to_dict()}")
     print(f"  win     rate: {df_signals['win'].mean():.1%}   (actual_ret > 0.5%)")
     print(f"  hit_t1  rate: {df_signals['hit_t1'].mean():.1%}   (full T1 hit)")
-    print(f"  win_rr  rate: {df_signals['win_rr'].mean():.1%}   (return > 1.5x ATR%)")
+    print(f"  hit_t3  rate: {df_signals['hit_t3'].mean():.1%}   (T1 within 3 days)")
+    print(f"  win_rr  rate: {df_signals['win_rr'].mean():.1%}   (return > 0.8x ATR%)")
     print(f"  rr_ratio mean: {df_signals['rr_ratio'].mean():.3f}R")
+
+    # --- Sprint 4: inject Phase 2b + 2c scores as meta-features ---------------
+    # These become base learner inputs for Phase 3 stacking meta-learner.
+    # Both models are optional — skipped gracefully if not yet trained.
+
+    P2B_FEATURE_COLS = [
+        'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
+        'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14',
+        'mom5', 'dow', 'rule_id', 'direction',
+        'dist_hi52', 'dist_lo52', 'vol_accel',
+        'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+        'deliv_pct', 'pcr', 'india_vix',
+        'conf_vol', 'rsi_dir', 'hi52_dir',
+        'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
+        'mom3', 'mom10', 'mom20',
+        'rsi_div', 'vol_accel_delta',
+        'days_since_52hi', 'expiry_dist',
+        'regime_stability', 'transition_risk',
+    ]  # 38 — matches Phase 2b kernel FEATURE_COLS
+
+    P2C_BASE_COLS = [
+        'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
+        'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14',
+        'mom5', 'dow', 'rule_id', 'direction',
+        'dist_hi52', 'dist_lo52', 'vol_accel',
+        'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+        'deliv_pct', 'pcr', 'india_vix',
+        'conf_vol', 'rsi_dir', 'hi52_dir',
+        'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
+        'mom3', 'mom10', 'mom20',
+        'rsi_div', 'vol_accel_delta',
+        'days_since_52hi', 'expiry_dist',
+        'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
+        'hmm_regime',
+        # Sprint 2A: compression/structure
+        'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
+        'cpr_midpoint_trend', 'cpr_expansion_factor',
+        # Sprint 2B: structural + context
+        'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
+        'cpr_width_percentile_252d', 'prev_day_ochoa_type',
+    ]  # 51
+
+    injected = False
+    try:
+        import lightgbm as _lgb
+
+        # Ensure string columns are numeric for LightGBM
+        for col in ['rule_id', 'direction']:
+            if col in df_signals.columns and df_signals[col].dtype == object:
+                extracted = df_signals[col].astype(str).str.extract(r'(\d+)')[0]
+                if extracted.notna().mean() > 0.5:
+                    df_signals[col] = pd.to_numeric(extracted, errors='coerce').fillna(0)
+                else:
+                    df_signals[col] = df_signals[col].astype('category').cat.codes
+
+        # Phase 2b score
+        p2b_path = os.path.join(MODELS_DIR, 'lgbm_scorer.txt')
+        if os.path.exists(p2b_path):
+            p2b_cols_present = [c for c in P2B_FEATURE_COLS if c in df_signals.columns]
+            missing_p2b      = [c for c in P2B_FEATURE_COLS if c not in df_signals.columns]
+            for c in missing_p2b:
+                df_signals[c] = 0.0
+            p2b_model = _lgb.Booster(model_file=p2b_path)
+            X_p2b = df_signals[P2B_FEATURE_COLS].fillna(0).values.astype(np.float32)
+            df_signals['lgbm2b_score'] = np.clip(p2b_model.predict(X_p2b), 0.0, 1.0)
+            print(f"  lgbm2b_score injected (mean={df_signals['lgbm2b_score'].mean():.4f})")
+            injected = True
+        else:
+            df_signals['lgbm2b_score'] = 0.5
+            print("  lgbm_scorer.txt not found — lgbm2b_score = 0.5 (neutral placeholder)")
+
+        # Phase 2c interaction features (needed for 2c model input)
+        df_signals['cpr_vol_interaction']    = (1.0 - df_signals['cpr_compress'].clip(0, 1)) * df_signals['vol_rank']
+        df_signals['regime_momentum']        = df_signals['hmm_regime'].clip(0, 3) * df_signals['mom5']
+        df_signals['cpr_rsi_squeeze']        = (1.0 - df_signals['cpr_width_pct'].clip(0, 1)) * df_signals['rsi14'] / 100.0
+        df_signals['overlap_vol_signal']     = df_signals['cpr_overlap_pct'] * df_signals['cpr_zone_vol_ratio']
+        df_signals['rs_direction_alignment'] = (df_signals['market_rs_5d'] + df_signals['sector_rs_5d']) * df_signals['direction']
+        df_signals['virgin_momentum']        = df_signals.get('cpr_virgin', 0.0) * df_signals['mom5']
+        df_signals['narrow_breakout_vol']    = df_signals.get('consecutive_narrow_cprs', 0.0) * df_signals['vol_rank']
+
+        P2C_ALL_COLS = P2C_BASE_COLS + [
+            'cpr_vol_interaction', 'regime_momentum', 'cpr_rsi_squeeze',
+            'overlap_vol_signal', 'rs_direction_alignment',
+            'virgin_momentum', 'narrow_breakout_vol',
+        ]  # 58 (51 base + 7 interactions)
+
+        # Phase 2c global score
+        p2c_path = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')
+        if os.path.exists(p2c_path):
+            for c in P2C_ALL_COLS:
+                if c not in df_signals.columns:
+                    df_signals[c] = 0.0
+            p2c_model = _lgb.Booster(model_file=p2c_path)
+            X_p2c = df_signals[P2C_ALL_COLS].fillna(0).values.astype(np.float32)
+            df_signals['lgbm2c_score'] = np.clip(p2c_model.predict(X_p2c), 0.0, 1.0)
+            print(f"  lgbm2c_score injected (mean={df_signals['lgbm2c_score'].mean():.4f})")
+            injected = True
+        else:
+            df_signals['lgbm2c_score'] = 0.5
+            print("  lgbm2c_global.txt not found — lgbm2c_score = 0.5 (neutral placeholder)")
+
+        # Drop temporary interaction cols (they'll be recomputed by Phase 2c kernel)
+        df_signals.drop(columns=['cpr_vol_interaction', 'regime_momentum', 'cpr_rsi_squeeze',
+                                  'overlap_vol_signal', 'rs_direction_alignment',
+                                  'virgin_momentum', 'narrow_breakout_vol'],
+                        inplace=True, errors='ignore')
+
+        # Overwrite CSV with meta-feature columns added
+        df_signals.to_csv(out, index=False)
+        if injected:
+            print(f"  CSV updated with lgbm2b_score + lgbm2c_score → {out}")
+
+    except Exception as e:
+        print(f"  Sprint 4 meta-feature injection skipped: {e}")
 
 
 if __name__ == '__main__':

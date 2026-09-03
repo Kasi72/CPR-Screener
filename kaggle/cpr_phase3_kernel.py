@@ -62,7 +62,7 @@ os.makedirs(WORK, exist_ok=True)
 
 # ── Constants (must match data_utils.py) ──────────────────────────────────────
 
-FEATURE_COLS = [
+_BASE_FEATURES = [
     'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
     'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14',
     'mom5', 'dow', 'rule_id', 'direction',
@@ -71,8 +71,38 @@ FEATURE_COLS = [
     'deliv_pct', 'pcr', 'india_vix', 'conf_vol', 'rsi_dir', 'hi52_dir',
     'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
     'mom3', 'mom10', 'mom20', 'rsi_div', 'vol_accel_delta',
-    'days_since_52hi', 'expiry_dist', 'regime_stability', 'transition_risk',
-]
+    'days_since_52hi', 'expiry_dist',
+    # Sprint 1 CPR features (Phase 2c)
+    'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
+    # HMM regime
+    'hmm_regime',
+    # Sprint 2A: compression/structure CPR features
+    'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
+    'cpr_midpoint_trend', 'cpr_expansion_factor',
+    # Sprint 2B: structural + context CPR features
+    'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
+    'cpr_width_percentile_252d', 'prev_day_ochoa_type',
+]  # 46
+
+_INTERACTION_FEATURES = [
+    'cpr_vol_interaction',       # cpr_compress x vol_rank
+    'regime_momentum',           # hmm_regime x mom5
+    'cpr_rsi_squeeze',           # (1 - cpr_width_pct) x rsi14
+    'overlap_vol_signal',        # cpr_overlap_pct x cpr_zone_vol_ratio
+    'rs_direction_alignment',    # (market_rs_5d + sector_rs_5d) x direction
+    'virgin_momentum',           # cpr_virgin x mom5
+    'narrow_breakout_vol',       # consecutive_narrow_cprs x vol_rank
+]  # 7
+
+FEATURE_COLS = _BASE_FEATURES + _INTERACTION_FEATURES  # 58 — matches Phase 2c model (51 base + 7 interactions)
+
+# Directional features (sign flipped for SELL signals)
+_DIRECTIONAL = {
+    'dist_hi52', 'dist_lo52', 'vwap_dist', 'ema200_dist',
+    'mom3', 'mom5', 'mom10', 'mom20',
+    'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+    'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel', 'open_to_cpr_dist',
+}
 
 MONOTONE_CONSTRAINTS = [
     0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
@@ -80,14 +110,15 @@ MONOTONE_CONSTRAINTS = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, -1,
 ]
 
-SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5']
+SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5',
+                 'ema14_dist', 'atr14', 'bb_pos', 'vol_mom']
 WIN_COL       = 'hit_t1'
 SEQ_LEN       = 30
-EPOCHS        = 40
-BATCH_SIZE    = 256   # larger batch on GPU (T4 = 16 GB)
-LR            = 1e-3
-PATIENCE      = 8
-HIDDEN_DIM    = 64
+EPOCHS        = 80
+BATCH_SIZE    = 512   # larger batch on GPU (T4 = 16 GB)
+LR            = 5e-4
+PATIENCE      = 15
+HIDDEN_DIM    = 128
 DROPOUT       = 0.3
 
 
@@ -182,7 +213,18 @@ def load_signal_dataset():
     if WIN_COL not in df.columns:
         raise ValueError(f"Target column '{WIN_COL}' missing from dataset.")
     df[WIN_COL] = df[WIN_COL].astype(int)
-    print(f"  {len(df)} signals loaded.")
+
+    # Sprint 4: load Phase 2b/2c meta-scores if present (neutral 0.5 if missing)
+    for score_col in ('lgbm2b_score', 'lgbm2c_score'):
+        if score_col not in df.columns:
+            df[score_col] = 0.5
+        else:
+            df[score_col] = df[score_col].fillna(0.5).clip(0.0, 1.0).astype('float32')
+
+    p2b_real = (df['lgbm2b_score'] != 0.5).mean()
+    p2c_real = (df['lgbm2c_score'] != 0.5).mean()
+    print(f"  {len(df)} signals loaded.  "
+          f"lgbm2b_score coverage={p2b_real:.1%}  lgbm2c_score coverage={p2c_real:.1%}")
     return df
 
 
@@ -209,6 +251,17 @@ def _precompute_features(grp):
     rsi14 = np.full(n, 50.0, np.float32)
     sgv   = np.zeros(n, np.float32)
     mom5  = np.zeros(n, np.float32)
+    ema14     = np.zeros(n, np.float32)
+    ema14_d   = np.zeros(n, np.float32)
+    atr14     = np.zeros(n, np.float32)
+    atr14_s   = np.zeros(n, np.float32)
+    bb_pos    = np.zeros(n, np.float32)
+    vol_mom   = np.zeros(n, np.float32)
+
+    _ema_alpha = 2.0 / 15.0
+    ema14[0]  = c[0]
+    atr14_s[0] = (h[0] - l[0]) / c[0] if c[0] > 0 else 0.0
+
     for j in range(1, n):
         if c[j-1] > 0: ret[j]  = float(c[j] / c[j-1] - 1)
         if c[j]   > 0: hl_r[j] = float((h[j] - l[j]) / c[j])
@@ -217,7 +270,22 @@ def _precompute_features(grp):
         rsi14[j] = float(rsi_wilder(c[max(0, j-29):j+1]))
         sgv[j]   = float(sg_vel(c[max(0, j-20):j+1]))
         if j >= 5 and c[j-5] > 0: mom5[j] = float(c[j] / c[j-5] - 1)
-    return np.stack([ret, hl_r, vol_r, rsi14 / 100.0, sgv, mom5], axis=1).astype(np.float32)
+        # EMA14
+        ema14[j] = _ema_alpha * c[j] + (1 - _ema_alpha) * ema14[j-1]
+        if ema14[j] > 0: ema14_d[j] = float((c[j] - ema14[j]) / ema14[j])
+        # ATR14 (Wilder smoothing)
+        tr = float(max(h[j] - l[j], abs(h[j] - c[j-1]), abs(l[j] - c[j-1])))
+        raw_atr = tr / c[j] if c[j] > 0 else 0.0
+        atr14_s[j] = (atr14_s[j-1] * 13 + raw_atr) / 14
+        # Bollinger Band position (20-day)
+        if j >= 20:
+            w = c[j-20:j]; mu = w.mean(); sd = w.std()
+            if sd > 0: bb_pos[j] = float(np.clip((c[j] - mu) / (2 * sd), -2, 2))
+        # Volume momentum
+        if j >= 5: vol_mom[j] = float(np.clip(vol_r[j] - vol_r[j-5], -3, 3))
+
+    return np.stack([ret, hl_r, vol_r, rsi14 / 100.0, sgv, mom5,
+                     ema14_d, atr14_s, bb_pos, vol_mom], axis=1).astype(np.float32)
 
 
 def build_sequences(df_all, df_signals):
@@ -329,7 +397,9 @@ def _load_regime_models(global_lgbm):
     models = {}
     expected = global_lgbm.num_feature()
     for s in range(4):
-        p = os.path.join(MODELS, f'lgbm_regime_{s}.txt')
+        p2c = os.path.join(MODELS, f'lgbm2c_regime_{s}.txt')
+        p1  = os.path.join(MODELS, f'lgbm_regime_{s}.txt')
+        p   = p2c if os.path.exists(p2c) else p1
         if os.path.exists(p):
             m = lgb.Booster(model_file=p)
             if m.num_feature() == expected:
@@ -393,6 +463,9 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
     lst_oos = np.zeros(n)
     reg_oos = np.zeros(n)
     sft_oos = np.zeros(n)
+    # Sprint 4: Phase 2b/2c scores are pre-computed — use directly (no OOS leakage)
+    p2b_oos = df_sig['lgbm2b_score'].values.astype(np.float32)
+    p2c_oos = df_sig['lgbm2c_score'].values.astype(np.float32)
 
     splitter = PurgedTimeSeriesSplit(n_splits=5, embargo_days=7)
 
@@ -475,9 +548,9 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
         xgb_tuned[val_idx] = 1.0 / (1.0 + np.exp(-mf.predict(dvf)))
     xgb_oos = xgb_tuned
 
-    # LightGBM meta-learner
-    print("  Fitting LightGBM meta-learner ...")
-    meta_X    = np.column_stack([xgb_oos, lgb_oos, lst_oos, reg_oos, sft_oos])
+    # LightGBM meta-learner (Sprint 4: +2 Phase 2b/2c columns = 7 base learners)
+    print("  Fitting LightGBM meta-learner (7 base learners: xgb/lgb/lstm/regime/soft/p2b/p2c) ...")
+    meta_X    = np.column_stack([xgb_oos, lgb_oos, lst_oos, reg_oos, sft_oos, p2b_oos, p2c_oos])
     n_meta_tr = int(n * 0.80)
     meta_tr   = lgb.Dataset(meta_X[:n_meta_tr], label=y[:n_meta_tr])
     meta_val  = lgb.Dataset(meta_X[n_meta_tr:], label=y[n_meta_tr:], reference=meta_tr)
@@ -501,8 +574,11 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
     auc_lst  = roc_auc_score(y, lst_oos)
     auc_reg  = roc_auc_score(y, reg_oos)
     auc_sft  = roc_auc_score(y, sft_oos)
+    auc_p2b  = roc_auc_score(y, p2b_oos)
+    auc_p2c  = roc_auc_score(y, p2c_oos)
     print(f"\n  OOS AUC — XGB:{auc_xgb:.4f}  LGB:{auc_lgb:.4f}  LSTM:{auc_lst:.4f}"
-          f"  Regime:{auc_reg:.4f}  Soft:{auc_sft:.4f}  STACK:{auc_meta:.4f}")
+          f"  Regime:{auc_reg:.4f}  Soft:{auc_sft:.4f}"
+          f"  P2b:{auc_p2b:.4f}  P2c:{auc_p2c:.4f}  STACK:{auc_meta:.4f}")
 
     # Threshold calibration on held-out slice
     y_cal = y[n_meta_tr:]
@@ -519,13 +595,16 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
     print(f"  Threshold: {best_thresh:.2f}  (precision={best_prec:.3f} at recall≥0.30)")
 
     return {
-        'meta_learner': 'lgbm',
+        'meta_learner':  'lgbm',
+        'meta_learner_inputs': ['xgb', 'lgbm', 'lstm', 'regime', 'soft', 'p2b', 'p2c'],
         'meta_lgbm_path': out_meta,
         'auc_xgb':     round(float(auc_xgb),  4),
         'auc_lgbm':    round(float(auc_lgb),   4),
         'auc_lstm':    round(float(auc_lst),   4),
         'auc_regime':  round(float(auc_reg),   4),
         'auc_soft':    round(float(auc_sft),   4),
+        'auc_p2b':     round(float(auc_p2b),   4),
+        'auc_p2c':     round(float(auc_p2c),   4),
         'auc_stack':   round(float(auc_meta),  4),
         'threshold':   round(float(best_thresh), 2),
         'threshold_precision': round(float(best_prec), 4),
@@ -542,15 +621,28 @@ def main():
     print("=" * 60)
     print(f"  Device: {DEVICE}  |  EPOCHS={EPOCHS}  BATCH={BATCH_SIZE}")
 
-    lgbm_model = lgb.Booster(model_file=os.path.join(MODELS, 'lgbm_model.txt'))
+    _lgbm_p2c = os.path.join(MODELS, 'lgbm2c_global.txt')
+    _lgbm_p1  = os.path.join(MODELS, 'lgbm_model.txt')
+    _lgbm_path = _lgbm_p2c if os.path.exists(_lgbm_p2c) else _lgbm_p1
+    print(f"  Loading LightGBM from: {os.path.basename(_lgbm_path)}")
+    lgbm_model = lgb.Booster(model_file=_lgbm_path)
     df_sig     = load_signal_dataset()
 
-    # Cap at 100k for sequence building (memory-safe)
-    if len(df_sig) > 100_000:
-        df_sig = df_sig.sample(100_000, random_state=42).sort_values('date').reset_index(drop=True)
-        print(f"  Sampled 100k signals for LSTM.")
+    # Cap at 400k for sequence building (10-feature seqs × 400K × 30 bars ≈ 480 MB)
+    if len(df_sig) > 400_000:
+        df_sig = df_sig.sample(400_000, random_state=42).sort_values('date').reset_index(drop=True)
+        print(f"  Sampled 400k signals for LSTM.")
 
-    X_tab = df_sig[FEATURE_COLS].values.astype(np.float32)
+    # Compute Phase 2c interaction features (required for 46-feature models)
+    df_sig['cpr_vol_interaction']    = df_sig['cpr_compress'] * df_sig['vol_rank']
+    df_sig['regime_momentum']        = df_sig['hmm_regime']   * df_sig['mom5']
+    df_sig['cpr_rsi_squeeze']        = (1 - df_sig['cpr_width_pct']) * df_sig['rsi14']
+    df_sig['overlap_vol_signal']     = df_sig['cpr_overlap_pct'] * df_sig['cpr_zone_vol_ratio']
+    df_sig['rs_direction_alignment'] = (df_sig['market_rs_5d'] + df_sig['sector_rs_5d']) * df_sig['direction']
+    df_sig['virgin_momentum']        = df_sig.get('cpr_virgin', 0.0) * df_sig.get('mom5', 0.0)
+    df_sig['narrow_breakout_vol']    = df_sig.get('consecutive_narrow_cprs', 0.0) * df_sig.get('vol_rank', 1.0)
+
+    X_tab = df_sig[FEATURE_COLS].fillna(0).values.astype(np.float32)
     y     = df_sig[WIN_COL].values.astype(int)
 
     # Build sequences
@@ -566,8 +658,10 @@ def main():
         X_tab  = df_sig[FEATURE_COLS].values.astype(np.float32)
         y      = y_seq
     else:
-        print("  OHLCV not found — using tabular proxy sequences (6 features repeated).")
-        seq_feat = X_tab[:, :len(SEQUENCE_COLS)]
+        print("  OHLCV not found — using tabular proxy sequences (10 features, padded/repeated).")
+        seq_feat = np.zeros((len(X_tab), len(SEQUENCE_COLS)), dtype=np.float32)
+        n_base   = min(6, X_tab.shape[1])
+        seq_feat[:, :n_base] = X_tab[:, :n_base]
         X_seq    = np.tile(seq_feat[:, np.newaxis, :], (1, SEQ_LEN, 1))
 
     # Temporal split 80/20
