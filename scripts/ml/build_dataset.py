@@ -373,6 +373,38 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         else:
             cpr_expansion_factor = 1.0
 
+        # --- Sprint 3: Directional gap + bar quality + volatility/volume structure ---
+
+        # S3-1. gap_pct: today's open vs prev close (gap direction = continuation signal)
+        gap_pct = float(np.clip((opens[i] - closes[i-1]) / closes[i-1], -0.10, 0.10))
+
+        # S3-2. cpr_test_count_5d: how many of last 5 bars touched today's CPR zone (magnetism)
+        cpr_test_count_5d = 0
+        for _j in range(max(1, i-5), i):
+            if lows[_j] <= cpr['upper'] and highs[_j] >= cpr['lower']:
+                cpr_test_count_5d += 1
+
+        # S3-3. prev_bar_close_pos: yesterday's close as fraction of its H-L range [0=low, 1=high]
+        _prev_hl = highs[i-1] - lows[i-1]
+        prev_bar_close_pos = float(np.clip(
+            (closes[i-1] - lows[i-1]) / max(_prev_hl, 0.001), 0.0, 1.0))
+
+        # S3-4. atr_expansion: today's ATR / 5-day avg ATR (>1=expanding, <1=contracting)
+        _atrs_5d = [atr(highs[max(0, _j-14):_j], lows[max(0, _j-14):_j],
+                        closes[max(0, _j-14):_j]) for _j in range(max(14, i-5), i)]
+        _avg_atr_5d = float(np.mean(_atrs_5d)) if _atrs_5d else cur_atr
+        atr_expansion = float(np.clip(cur_atr / max(_avg_atr_5d, 0.001), 0.2, 5.0))
+
+        # S3-5. vol_trend_slope: 5-day volume slope / avg (positive = volume building)
+        _vol5 = volumes[max(0, i-5):i].astype(float)
+        if len(_vol5) >= 3:
+            _vmean = _vol5.mean()
+            _vx    = np.arange(len(_vol5), dtype=float)
+            vol_trend_slope = float(np.clip(
+                np.polyfit(_vx, _vol5, 1)[0] / max(_vmean, 1), -1.0, 1.0))
+        else:
+            vol_trend_slope = 0.0
+
         # --- Sprint 2 (Part B): structural + context CPR features ---
 
         # 10. cpr_above_prev_cpr: today's BC > yesterday's TC (bullish CPR structure gap)
@@ -501,6 +533,12 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
                 'atr_to_cpr_ratio':            round(atr_to_cpr_ratio, 4),
                 'cpr_width_percentile_252d':   round(cpr_width_percentile_252d, 4),
                 'prev_day_ochoa_type':         prev_day_ochoa_type,
+                # --- Sprint 3: gap + bar quality + volatility + volume structure ---
+                'gap_pct':                     round(gap_pct, 5),
+                'cpr_test_count_5d':           cpr_test_count_5d,
+                'prev_bar_close_pos':          round(prev_bar_close_pos, 4),
+                'atr_expansion':               round(atr_expansion, 4),
+                'vol_trend_slope':             round(vol_trend_slope, 4),
                 # --- labels ---
                 'atr_pct':       round(atr_pct, 6),
                 'actual_return': actual_ret,

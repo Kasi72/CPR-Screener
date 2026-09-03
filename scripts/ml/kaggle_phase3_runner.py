@@ -158,7 +158,8 @@ def wait_for_dataset_ready(max_wait_s=600):
         r = _run(['kaggle', 'datasets', 'files', DATASET_SLUG], check=False, capture=True)
         out = (r.stdout or '') + (r.stderr or '')
         if 'signal_dataset.csv' in out:
-            print(f"    Dataset ready (attempt {attempt}).")
+            print(f"    Dataset ready (attempt {attempt}). Waiting 90s for version commit ...")
+            time.sleep(90)
             return
         print(f"    [{attempt}] Not ready yet. Waiting 30s ...")
         time.sleep(30)
@@ -241,12 +242,15 @@ def download_outputs():
                 zf.extractall(out_dir)
 
         # Copy model outputs to local MODELS_DIR
-        target_files = [
-            'lstm_model.pt',
+        required_files = [
             'stacking_weights.json',
             'meta_lgbm.txt',
             'phase3_metrics.json',
         ]
+        optional_files = [
+            'lstm_model.pt',  # only present when USE_LSTM=True in kernel
+        ]
+        target_files = required_files + optional_files
         copied = []
         for fn in target_files:
             # Search recursively in case zip had sub-dirs
@@ -256,11 +260,14 @@ def download_outputs():
                 copied.append(fn)
                 print(f"    OK {fn}")
             else:
-                print(f"    ✗ {fn} NOT FOUND in kernel output")
+                if fn in required_files:
+                    print(f"    ✗ {fn} NOT FOUND in kernel output")
+                else:
+                    print(f"    -- {fn} not present (LSTM disabled)")
 
-        if len(copied) < len(target_files):
-            missing = set(target_files) - set(copied)
-            raise RuntimeError(f"Missing output files: {missing}")
+        missing_required = set(required_files) - set(copied)
+        if missing_required:
+            raise RuntimeError(f"Missing required output files: {missing_required}")
 
         print(f"    All {len(copied)} output files copied to {MODELS_DIR}")
     finally:

@@ -37,8 +37,9 @@ warnings.filterwarnings('ignore')
 
 INPUT  = '/kaggle/input/cpr-screener-phase3-inputs'
 MODELS = os.path.join(INPUT, 'models')
-WORK   = '/kaggle/working'
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+WORK     = '/kaggle/working'
+DEVICE   = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+USE_LSTM = False  # AUC was 0.5882 (near-random) — disabled until Sprint 4 OHLCV rebuild
 
 # Verify CUDA LSTM actually runs on this Kaggle instance.
 # cudaErrorNoKernelImageForDevice = PyTorch binary not compiled for this GPU's
@@ -82,7 +83,10 @@ _BASE_FEATURES = [
     # Sprint 2B: structural + context CPR features
     'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
     'cpr_width_percentile_252d', 'prev_day_ochoa_type',
-]  # 46
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+    'atr_expansion', 'vol_trend_slope',
+]  # 56
 
 _INTERACTION_FEATURES = [
     'cpr_vol_interaction',       # cpr_compress x vol_rank
@@ -94,7 +98,7 @@ _INTERACTION_FEATURES = [
     'narrow_breakout_vol',       # consecutive_narrow_cprs x vol_rank
 ]  # 7
 
-FEATURE_COLS = _BASE_FEATURES + _INTERACTION_FEATURES  # 58 — matches Phase 2c model (51 base + 7 interactions)
+FEATURE_COLS = _BASE_FEATURES + _INTERACTION_FEATURES  # 63 — matches Phase 2c model (56 base + 7 interactions)
 
 # Directional features (sign flipped for SELL signals)
 _DIRECTIONAL = {
@@ -102,13 +106,44 @@ _DIRECTIONAL = {
     'mom3', 'mom5', 'mom10', 'mom20',
     'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
     'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel', 'open_to_cpr_dist',
+    'gap_pct',
+    # prev_bar_close_pos excluded: semantics ambiguous for shorts (near-high = resistance)
 }
 
 MONOTONE_CONSTRAINTS = [
+    # original 12
     0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 1, 0, 0, 0, 0, 1, 0, -1, 1, -1, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, -1,
-]
+    # Phase A: dist_hi52, dist_lo52, vol_accel
+    0, 0, 1,
+    # Phase B: market_rs_5d/20d, sector_rs_5d/20d
+    0, 0, 0, 0,
+    # Phase C: deliv_pct
+    1,
+    # Phase D: pcr
+    0,
+    # Tier 1: india_vix, conf_vol, rsi_dir, hi52_dir
+    -1, 1, -1, 0,
+    # Tier 2A: cpr_compress, cpr_pos, dist_r1, dist_s1
+    0, 0, 0, 0,
+    # Tier 2B: mom3, mom10, mom20
+    0, 0, 0,
+    # Tier 2C: rsi_div, vol_accel_delta
+    0, 1,
+    # Tier 2D: days_since_52hi, expiry_dist
+    0, 0,
+    # Sprint 1: cpr_overlap_pct, open_to_cpr_dist, prev_cpr_respected, cpr_zone_vol_ratio
+    0, 0, 1, 0,
+    # HMM regime
+    0,
+    # Sprint 2A: open_inside_cpr, cpr_virgin, consecutive_narrow_cprs, cpr_midpoint_trend, cpr_expansion_factor
+    1, 1, 1, 0, 0,
+    # Sprint 2B: cpr_above_prev_cpr, prev_close_inside_cpr, atr_to_cpr_ratio, cpr_width_percentile_252d, prev_day_ochoa_type
+    0, 0, 0, 1, 0,
+    # Sprint 3: gap_pct, cpr_test_count_5d, prev_bar_close_pos, atr_expansion, vol_trend_slope
+    0, 1, 1, 0, 1,
+    # Interaction features (7) — no monotone direction
+    0, 0, 0, 0, 0, 0, 0,
+]  # 63 — must match FEATURE_COLS length
 
 SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5',
                  'ema14_dist', 'atr14', 'bb_pos', 'vol_mom']
@@ -440,7 +475,7 @@ def _hard_route(X_tab, dates, state_by_date, regime_models, global_lgbm):
     return probs
 
 
-def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
+def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig, use_lstm=True):
     regime_models = _load_regime_models(lgbm_model)
     state_by_date, posterior_by_date = {}, {}
     hmm_path = os.path.join(MODELS, 'hmm_params.json')
@@ -490,8 +525,9 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
                           lgb.Dataset(Xtr_t, label=ytr), num_boost_round=200)
         lgb_oos[val_idx] = m_lgb.predict(Xval_t)
 
-        # LSTM OOS
-        lst_oos[val_idx] = get_lstm_probs(lstm_model, Xval_s)
+        # LSTM OOS (disabled — AUC was 0.5882, near-random)
+        if use_lstm and lstm_model is not None:
+            lst_oos[val_idx] = get_lstm_probs(lstm_model, Xval_s)
 
         # Regime routing
         if use_regime:
@@ -507,7 +543,7 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
             sft_oos[val_idx] = reg_oos[val_idx]
 
     # Optuna tune XGBoost on fold-1
-    print("\n  Tuning stacking XGB (15 trials) ...")
+    print("\n  Tuning stacking XGB (50 trials) ...")
     fold1_tr, fold1_val = next(iter(
         PurgedTimeSeriesSplit(n_splits=5, embargo_days=7).split(X_tab, dates=dates)))
     dtrain_t = xgb.DMatrix(X_tab[fold1_tr].astype(np.float32), label=y[fold1_tr])
@@ -518,7 +554,7 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
              'eta':       trial.suggest_float('eta', 0.03, 0.2, log=True),
              'subsample': trial.suggest_float('subsample', 0.6, 1.0),
              'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-             'min_child_weight': trial.suggest_int('min_child_weight', 1, 20),
+             'min_child_weight': trial.suggest_int('min_child_weight', 10, 80),
              'seed': 42, 'monotone_constraints': tuple(MONOTONE_CONSTRAINTS)}
         m   = xgb.train(p, dtrain_t, num_boost_round=200, obj=focal_loss_obj)
         raw = m.predict(dval_t)
@@ -529,7 +565,7 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
         _optuna.logging.set_verbosity(_optuna.logging.WARNING)
         study = _optuna.create_study(direction='maximize',
                                      sampler=_optuna.samplers.TPESampler(seed=42))
-        study.optimize(_xgb_obj, n_trials=15, show_progress_bar=False)
+        study.optimize(_xgb_obj, n_trials=50, show_progress_bar=False)
         best_xgb_params = {**study.best_params, 'seed': 42,
                            'monotone_constraints': tuple(MONOTONE_CONSTRAINTS)}
         print(f"  Best XGB AUC={study.best_value:.4f}")
@@ -548,9 +584,15 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
         xgb_tuned[val_idx] = 1.0 / (1.0 + np.exp(-mf.predict(dvf)))
     xgb_oos = xgb_tuned
 
-    # LightGBM meta-learner (Sprint 4: +2 Phase 2b/2c columns = 7 base learners)
-    print("  Fitting LightGBM meta-learner (7 base learners: xgb/lgb/lstm/regime/soft/p2b/p2c) ...")
-    meta_X    = np.column_stack([xgb_oos, lgb_oos, lst_oos, reg_oos, sft_oos, p2b_oos, p2c_oos])
+    # LightGBM meta-learner (5 or 6 base learners depending on USE_LSTM; p2b removed — fragile CSV dep)
+    _base_cols = [xgb_oos, lgb_oos, reg_oos, sft_oos, p2c_oos]
+    if use_lstm and lstm_model is not None:
+        _base_cols.insert(2, lst_oos)
+    _learner_names = ['xgb', 'lgbm', 'regime', 'soft', 'p2c']
+    if use_lstm and lstm_model is not None:
+        _learner_names.insert(2, 'lstm')
+    print(f"  Fitting LightGBM meta-learner ({len(_learner_names)} base learners: {'/'.join(_learner_names)}) ...")
+    meta_X    = np.column_stack(_base_cols)
     n_meta_tr = int(n * 0.80)
     meta_tr   = lgb.Dataset(meta_X[:n_meta_tr], label=y[:n_meta_tr])
     meta_val  = lgb.Dataset(meta_X[n_meta_tr:], label=y[n_meta_tr:], reference=meta_tr)
@@ -571,14 +613,14 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
 
     auc_xgb  = roc_auc_score(y, xgb_oos)
     auc_lgb  = roc_auc_score(y, lgb_oos)
-    auc_lst  = roc_auc_score(y, lst_oos)
+    auc_lst  = roc_auc_score(y, lst_oos) if (use_lstm and lstm_model is not None) else None
     auc_reg  = roc_auc_score(y, reg_oos)
     auc_sft  = roc_auc_score(y, sft_oos)
-    auc_p2b  = roc_auc_score(y, p2b_oos)
     auc_p2c  = roc_auc_score(y, p2c_oos)
-    print(f"\n  OOS AUC — XGB:{auc_xgb:.4f}  LGB:{auc_lgb:.4f}  LSTM:{auc_lst:.4f}"
+    _lstm_str = f"  LSTM:{auc_lst:.4f}" if auc_lst is not None else "  LSTM:disabled"
+    print(f"\n  OOS AUC — XGB:{auc_xgb:.4f}  LGB:{auc_lgb:.4f}{_lstm_str}"
           f"  Regime:{auc_reg:.4f}  Soft:{auc_sft:.4f}"
-          f"  P2b:{auc_p2b:.4f}  P2c:{auc_p2c:.4f}  STACK:{auc_meta:.4f}")
+          f"  P2c:{auc_p2c:.4f}  STACK:{auc_meta:.4f}")
 
     # Threshold calibration on held-out slice
     y_cal = y[n_meta_tr:]
@@ -596,14 +638,14 @@ def train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig):
 
     return {
         'meta_learner':  'lgbm',
-        'meta_learner_inputs': ['xgb', 'lgbm', 'lstm', 'regime', 'soft', 'p2b', 'p2c'],
+        'meta_learner_inputs': _learner_names,
+        'use_lstm':      use_lstm and lstm_model is not None,
         'meta_lgbm_path': out_meta,
         'auc_xgb':     round(float(auc_xgb),  4),
         'auc_lgbm':    round(float(auc_lgb),   4),
-        'auc_lstm':    round(float(auc_lst),   4),
+        'auc_lstm':    round(float(auc_lst),   4) if auc_lst is not None else None,
         'auc_regime':  round(float(auc_reg),   4),
         'auc_soft':    round(float(auc_sft),   4),
-        'auc_p2b':     round(float(auc_p2b),   4),
         'auc_p2c':     round(float(auc_p2c),   4),
         'auc_stack':   round(float(auc_meta),  4),
         'threshold':   round(float(best_thresh), 2),
@@ -670,19 +712,22 @@ def main():
     X_s_tr, X_s_te   = X_seq[:n_tr], X_seq[n_tr:]
     y_tr,   y_te     = y[:n_tr],     y[n_tr:]
 
-    # Train LSTM
-    print("\n── Phase 3A: Training LSTM ──────────────────────────────────────")
-    lstm_model, lstm_auc = train_lstm(X_s_tr, y_tr, X_s_te, y_te)
-
-    out_lstm = os.path.join(WORK, 'lstm_model.pt')
-    torch.save({
-        'model_state': lstm_model.state_dict(),
-        'input_dim':   len(SEQUENCE_COLS),
-        'hidden_dim':  HIDDEN_DIM,
-        'seq_len':     SEQ_LEN,
-        'seq_cols':    SEQUENCE_COLS,
-    }, out_lstm)
-    print(f"  Saved → {out_lstm}")
+    # Train LSTM (disabled — AUC was 0.5882, near-random; Sprint 4 will rebuild with OHLCV sequences)
+    print("\n── Phase 3A: LSTM ───────────────────────────────────────────────")
+    if USE_LSTM:
+        lstm_model, lstm_auc = train_lstm(X_s_tr, y_tr, X_s_te, y_te)
+        out_lstm = os.path.join(WORK, 'lstm_model.pt')
+        torch.save({
+            'model_state': lstm_model.state_dict(),
+            'input_dim':   len(SEQUENCE_COLS),
+            'hidden_dim':  HIDDEN_DIM,
+            'seq_len':     SEQ_LEN,
+            'seq_cols':    SEQUENCE_COLS,
+        }, out_lstm)
+        print(f"  Saved → {out_lstm}")
+    else:
+        lstm_model, lstm_auc = None, 0.0
+        print("  LSTM disabled (USE_LSTM=False). Stack uses XGB+LGB+Regime+Soft only.")
 
     # Ensure lgbm_model feature count matches X_tab (stale models have fewer features)
     if lgbm_model.num_feature() != X_tab.shape[1]:
@@ -702,7 +747,8 @@ def main():
 
     # Stacking
     print("\n── Phase 3B: Stacking Meta-Learner ─────────────────────────────")
-    stacking_weights = train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig)
+    stacking_weights = train_stacking(lgbm_model, lstm_model, X_tab, X_seq, y, df_sig,
+                                      use_lstm=USE_LSTM)
 
     out_sw = os.path.join(WORK, 'stacking_weights.json')
     with open(out_sw, 'w') as f:

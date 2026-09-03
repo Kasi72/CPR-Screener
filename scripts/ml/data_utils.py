@@ -57,9 +57,15 @@ FEATURE_COLS = [
     # HMM regime quality (joined at training from posteriors, not in signal CSV)
     'regime_stability', # max_post_today − max_post_yesterday
     'transition_risk',  # 1 − max_posterior (probability of NOT being in dominant regime)
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct',            # today's open vs prev close (gap direction = continuation)
+    'cpr_test_count_5d',  # how many last 5 bars tested CPR (magnetism / support quality)
+    'prev_bar_close_pos', # yesterday's close position in H-L range [0=low, 1=high]
+    'atr_expansion',      # ATR today / 5d avg ATR (>1 = expanding volatility)
+    'vol_trend_slope',    # 5-day volume slope / avg (positive = volume building)
 ]
 
-# Monotone constraints aligned with FEATURE_COLS (38 features).
+# Monotone constraints aligned with FEATURE_COLS (43 features).
 # +1 = feature↑ → win rate↑  |  -1 = feature↑ → win rate↓  |  0 = no constraint
 MONOTONE_CONSTRAINTS = [
     0,   # cpr_width_pct
@@ -100,6 +106,11 @@ MONOTONE_CONSTRAINTS = [
     0,   # expiry_dist
     1,   # regime_stability: more stable regime → better signal quality
    -1,   # transition_risk: more uncertainty → worse signal quality
+    0,   # gap_pct: nonlinear (gap-up good for longs, bad for shorts — model learns)
+    1,   # cpr_test_count_5d: more CPR tests → stronger support/resistance level
+    1,   # prev_bar_close_pos: closed near high → bullish carry-through
+    0,   # atr_expansion: expanding ATR = more range, model learns direction
+    1,   # vol_trend_slope: volume building = breakout confirmation
 ]
 
 SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5']
@@ -200,7 +211,7 @@ def calc_vwap(opens, highs, lows, closes, volumes):
 # ── 3. FEATURE API ────────────────────────────────────────────────────────────
 
 def build_features(row: dict, rule_map: Optional[dict] = None) -> dict:
-    """Convert a signal row dict to the 38-feature vector dict (FEATURE_COLS order)."""
+    """Convert a signal row dict to the 43-feature vector dict (FEATURE_COLS order)."""
     if rule_map is None:
         rule_map = {f'rule{i}': i for i in range(1, 12)}
     return {
@@ -253,6 +264,12 @@ def build_features(row: dict, rule_map: Optional[dict] = None) -> dict:
         # HMM regime quality (0 = neutral defaults at inference)
         'regime_stability': float(row.get('regime_stability', 0.0)),
         'transition_risk':  float(row.get('transition_risk', 0.25)),
+        # Sprint 3: gap + bar quality + volatility + volume structure
+        'gap_pct':            float(row.get('gap_pct', 0.0)),
+        'cpr_test_count_5d':  float(row.get('cpr_test_count_5d', 0)),
+        'prev_bar_close_pos': float(row.get('prev_bar_close_pos', 0.5)),
+        'atr_expansion':      float(row.get('atr_expansion', 1.0)),
+        'vol_trend_slope':    float(row.get('vol_trend_slope', 0.0)),
     }
 
 

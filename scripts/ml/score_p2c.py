@@ -36,7 +36,10 @@ BASE_FEATURES = [
     # Sprint 2B: structural + context CPR features
     'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
     'cpr_width_percentile_252d', 'prev_day_ochoa_type',
-]  # 51
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+    'atr_expansion', 'vol_trend_slope',
+]  # 56
 
 INTERACTION_FEATURES = [
     'cpr_vol_interaction',
@@ -56,6 +59,8 @@ DIRECTIONAL_FEATURES = {
     'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
     'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel',
     'open_to_cpr_dist',
+    'gap_pct',          # gap-up = good for long, gap-down = good for short
+    # prev_bar_close_pos excluded: semantics ambiguous for shorts (near-high = resistance)
 }
 
 

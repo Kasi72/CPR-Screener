@@ -51,6 +51,9 @@ BATCH_SIZE = 128
 LR         = 1e-3
 PATIENCE   = 8
 
+# LSTM AUC=0.5882 (near-random) drags ensemble down — disable until Sprint 4 rebuild
+USE_LSTM   = False
+
 
 class SequenceDataset(Dataset):
     def __init__(self, sequences, labels):
@@ -284,7 +287,7 @@ def _soft_blend_probs(X_tab, dates, posterior_by_date, regime_models, global_lgb
 
 
 def train_stacking(lgbm_model, lstm_model,
-                   X_tab, X_seq, y, df_sig=None):
+                   X_tab, X_seq, y, df_sig=None, use_lstm=True):
     """
     Generate OOS predictions from each base model then fit a logistic meta-learner.
     Uses k=5 fold cross-predictions to avoid leakage.
@@ -348,8 +351,9 @@ def train_stacking(lgbm_model, lstm_model,
                           dtrl, num_boost_round=200)
         lgb_oos[val_idx] = m_lgb.predict(Xval_t)
 
-        # LSTM OOS
-        lst_oos[val_idx] = get_lstm_probs(lstm_model, Xval_s)
+        # LSTM OOS (skipped when USE_LSTM=False — AUC was 0.5882, near-random)
+        if use_lstm and lstm_model is not None:
+            lst_oos[val_idx] = get_lstm_probs(lstm_model, Xval_s)
 
         # Regime-aware LightGBM — hard routing (argmax state)
         if use_regime:
@@ -418,7 +422,10 @@ def train_stacking(lgbm_model, lstm_model,
 
     # ── Meta-learner: shallow LightGBM (non-linear combination of base models) ─
     print("  Fitting LightGBM meta-learner…")
-    meta_X = np.column_stack([xgb_oos, lgb_oos, lst_oos, reg_oos, soft_oos])
+    base_cols = [xgb_oos, lgb_oos, reg_oos, soft_oos]
+    if use_lstm and lstm_model is not None:
+        base_cols.insert(2, lst_oos)   # position preserved for backward compat
+    meta_X = np.column_stack(base_cols)
 
     # Temporal split for meta-learner (last 20% as val — avoid leakage)
     n_meta_tr = int(n * 0.80)
@@ -445,14 +452,17 @@ def train_stacking(lgbm_model, lstm_model,
     final_preds = meta_lgb.predict(meta_X)
     auc_xgb     = roc_auc_score(y, xgb_oos)
     auc_lgb     = roc_auc_score(y, lgb_oos)
-    auc_lst     = roc_auc_score(y, lst_oos)
+    auc_lst     = roc_auc_score(y, lst_oos) if (use_lstm and lstm_model is not None) else None
     auc_reg     = roc_auc_score(y, reg_oos)
     auc_soft    = roc_auc_score(y, soft_oos)
 
     print(f"\n  Stacking OOS AUC:")
     print(f"    XGBoost (tuned):  {auc_xgb:.4f}")
     print(f"    LightGBM:         {auc_lgb:.4f}")
-    print(f"    LSTM:             {auc_lst:.4f}")
+    if auc_lst is not None:
+        print(f"    LSTM:             {auc_lst:.4f}")
+    else:
+        print(f"    LSTM:             disabled (USE_LSTM=False)")
     print(f"    Regime-Hard:      {auc_reg:.4f}")
     print(f"    Regime-Soft:      {auc_soft:.4f}")
     print(f"    STACK (LGBM meta):{auc_meta:.4f}  ← ensemble")
@@ -477,9 +487,10 @@ def train_stacking(lgbm_model, lstm_model,
     weights = {
         'meta_learner':  'lgbm',
         'meta_lgbm_path': meta_lgb_path,
+        'use_lstm':      use_lstm and lstm_model is not None,
         'auc_xgb':       round(auc_xgb, 4),
         'auc_lgbm':      round(auc_lgb, 4),
-        'auc_lstm':      round(auc_lst, 4),
+        'auc_lstm':      round(auc_lst, 4) if auc_lst is not None else None,
         'auc_regime':    round(auc_reg, 4),
         'auc_soft':      round(auc_soft, 4),
         'auc_stack':     round(auc_meta, 4),
@@ -543,25 +554,28 @@ def main():
     X_s_tr, X_s_te = X_seq[:n_tr], X_seq[n_tr:]
     y_tr,   y_te   = y[:n_tr],     y[n_tr:]
 
-    # Phase 3A: Train LSTM
-    print("\n── Phase 3A: Training LSTM ──────────────────────────────────────")
-    lstm_model, lstm_auc = train_lstm(X_s_tr, y_tr, X_s_te, y_te)
-
-    out_lstm = os.path.join(MODELS_DIR, 'lstm_model.pt')
-    torch.save({
-        'model_state': lstm_model.state_dict(),
-        'input_dim':   len(SEQUENCE_COLS),
-        'hidden_dim':  HIDDEN_DIM,
-        'seq_len':     SEQ_LEN,
-        'seq_cols':    SEQUENCE_COLS,
-    }, out_lstm)
-    print(f"  Saved → {out_lstm}")
+    # Phase 3A: Train LSTM (disabled — AUC was 0.5882, near-random; Sprint 4 will rebuild with OHLCV sequences)
+    print("\n── Phase 3A: LSTM ───────────────────────────────────────────────")
+    if USE_LSTM:
+        lstm_model, lstm_auc = train_lstm(X_s_tr, y_tr, X_s_te, y_te)
+        out_lstm = os.path.join(MODELS_DIR, 'lstm_model.pt')
+        torch.save({
+            'model_state': lstm_model.state_dict(),
+            'input_dim':   len(SEQUENCE_COLS),
+            'hidden_dim':  HIDDEN_DIM,
+            'seq_len':     SEQ_LEN,
+            'seq_cols':    SEQUENCE_COLS,
+        }, out_lstm)
+        print(f"  Saved → {out_lstm}")
+    else:
+        lstm_model, lstm_auc = None, 0.0
+        print("  LSTM disabled (USE_LSTM=False). Skipping — stack will use XGB+LGB+Regime+Soft.")
 
     # Phase 3B: Stacking
     print("\n── Phase 3B: Stacking Meta-Learner ─────────────────────────────")
     stacking_weights = train_stacking(
         lgbm_model, lstm_model,
-        X_tab, X_seq, y, df_sig=df_sig
+        X_tab, X_seq, y, df_sig=df_sig, use_lstm=USE_LSTM
     )
 
     out_sw = os.path.join(MODELS_DIR, 'stacking_weights.json')
@@ -570,7 +584,7 @@ def main():
     print(f"  Saved → {out_sw}")
 
     with open(os.path.join(MODELS_DIR, 'phase3_metrics.json'), 'w') as f:
-        json.dump({'lstm_auc': round(lstm_auc, 4), **stacking_weights}, f, indent=2)
+        json.dump({'lstm_auc': round(lstm_auc, 4) if lstm_auc else None, **stacking_weights}, f, indent=2)
 
     print("\n" + "=" * 60)
     print("  Phase 3 complete.")

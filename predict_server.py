@@ -308,7 +308,16 @@ _P2C_BASE_FEATURES = [
     'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
     # HMM regime
     'hmm_regime',
-]  # 41
+    # Sprint 2A: compression/structure CPR features
+    'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
+    'cpr_midpoint_trend', 'cpr_expansion_factor',
+    # Sprint 2B: structural + context CPR features
+    'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
+    'cpr_width_percentile_252d', 'prev_day_ochoa_type',
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+    'atr_expansion', 'vol_trend_slope',
+]  # 56
 
 _P2C_INTERACTION_FEATURES = [
     'cpr_vol_interaction',
@@ -316,16 +325,46 @@ _P2C_INTERACTION_FEATURES = [
     'cpr_rsi_squeeze',
     'overlap_vol_signal',
     'rs_direction_alignment',
-]  # 5
+    'virgin_momentum',
+    'narrow_breakout_vol',
+]  # 7
 
-_P2C_ALL_FEATURES = _P2C_BASE_FEATURES + _P2C_INTERACTION_FEATURES  # 46
+_P2C_ALL_FEATURES = _P2C_BASE_FEATURES + _P2C_INTERACTION_FEATURES  # 63
+
+# Directional features: sign-flip for SELL (direction=-1). Matches score_p2c.py.
+_P2C_DIRECTIONAL = {
+    'dist_hi52', 'dist_lo52', 'vwap_dist', 'ema200_dist',
+    'mom3', 'mom5', 'mom10', 'mom20',
+    'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+    'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel',
+    'open_to_cpr_dist',
+    'gap_pct',
+}
 
 _P2C_DEFAULTS = {
-    'cpr_overlap_pct':    0.5,
-    'open_to_cpr_dist':   0.0,
-    'prev_cpr_respected': 0.0,
-    'cpr_zone_vol_ratio': 1.0,
-    'hmm_regime':         -1,
+    'cpr_overlap_pct':           0.5,
+    'open_to_cpr_dist':          0.0,
+    'prev_cpr_respected':        0.0,
+    'cpr_zone_vol_ratio':        1.0,
+    'hmm_regime':               -1,
+    # Sprint 2A
+    'open_inside_cpr':           0.0,
+    'cpr_virgin':                0.0,
+    'consecutive_narrow_cprs':   0.0,
+    'cpr_midpoint_trend':        0.0,
+    'cpr_expansion_factor':      1.0,
+    # Sprint 2B
+    'cpr_above_prev_cpr':        0.0,
+    'prev_close_inside_cpr':     0.0,
+    'atr_to_cpr_ratio':          1.0,
+    'cpr_width_percentile_252d': 0.5,
+    'prev_day_ochoa_type':       0.0,
+    # Sprint 3
+    'gap_pct':                   0.0,
+    'cpr_test_count_5d':         0.0,
+    'prev_bar_close_pos':        0.5,
+    'atr_expansion':             1.0,
+    'vol_trend_slope':           0.0,
 }
 
 
@@ -338,61 +377,60 @@ def _p2c_current_regime():
 
 
 def extract_features_2c(data):
-    """Build 46-feature array for Phase 2c models. Computes interaction features server-side."""
+    """Build 63-feature array for Phase 2c models. Matches score_p2c.py logic exactly."""
     if isinstance(data, dict):
         data = [data]
 
     current_regime = _p2c_current_regime()
     rows = []
     for d in data:
-        # Base features — use existing defaults for original 36, Sprint 1 defaults for new 5
         vals = {}
         for f in _P2C_BASE_FEATURES:
             default = _P2C_DEFAULTS.get(f, _FEATURE_DEFAULTS.get(f, 0.0))
             vals[f] = float(d.get(f, default))
 
-        # Inject server-side HMM regime if caller didn't send it
         if vals['hmm_regime'] == -1 and current_regime >= 0:
             vals['hmm_regime'] = float(current_regime)
 
-        # Direction-adjust signed features (match kernel logic)
+        # Direction-adjust signed features (SELL signals get sign-flipped)
         direction = vals['direction']
-        for col in ('dist_hi52', 'dist_lo52', 'vwap_dist', 'ema200_dist',
-                    'mom3', 'mom5', 'mom10', 'mom20',
-                    'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
-                    'cpr_pos', 'dist_r1', 'dist_s1', 'sg_vel', 'open_to_cpr_dist'):
-            vals[col] = vals[col] * direction
+        if direction == -1:
+            for col in _P2C_DIRECTIONAL:
+                if col in vals:
+                    vals[col] = vals[col] * -1
 
-        # Compute interaction features
-        vals['cpr_vol_interaction']    = (1.0 - min(max(vals['cpr_compress'], 0.0), 1.0)) * vals['vol_rank']
-        vals['regime_momentum']        = max(vals['hmm_regime'], 0) * vals['mom5']
-        vals['cpr_rsi_squeeze']        = (1.0 - min(max(vals['cpr_width_pct'], 0.0), 1.0)) * vals['rsi14'] / 100.0
+        # Interaction features — exact formulas from score_p2c.py
+        vals['cpr_vol_interaction']    = vals['cpr_compress'] * vals['vol_rank']
+        vals['regime_momentum']        = vals['hmm_regime'] * vals['mom5']
+        vals['cpr_rsi_squeeze']        = (1.0 - vals['cpr_width_pct']) * vals['rsi14']
         vals['overlap_vol_signal']     = vals['cpr_overlap_pct'] * vals['cpr_zone_vol_ratio']
         vals['rs_direction_alignment'] = (vals['market_rs_5d'] + vals['sector_rs_5d']) * direction
+        vals['virgin_momentum']        = vals['cpr_virgin'] * vals['mom5']
+        vals['narrow_breakout_vol']    = vals['consecutive_narrow_cprs'] * vals['vol_rank']
 
         rows.append([float(np.nan_to_num(vals.get(f, 0.0))) for f in _P2C_ALL_FEATURES])
 
     return np.array(rows, dtype=np.float32)
 
 
-def score_lgbm2c(X_2c):
-    """Route each row to its regime-specific Phase 2c model; fall back to global."""
+def score_lgbm2c(X_2c, hmm_regimes=None):
+    """50% global + 50% regime-specific blend. Matches score_p2c.py scoring."""
     global_m   = models.get('lgbm2c_global')
     regime_map = models.get('lgbm2c_regimes', {})
 
     if global_m is None:
         return None
 
+    global_scores = global_m.predict(X_2c)
+    final_scores  = global_scores.copy()
+
     current_regime = _p2c_current_regime()
     regime_m = regime_map.get(current_regime)
+    if regime_m is not None and regime_m.num_feature() == X_2c.shape[1]:
+        regime_scores = regime_m.predict(X_2c)
+        final_scores  = 0.5 * global_scores + 0.5 * regime_scores
 
-    if regime_m is not None:
-        # Use regime model for all rows (single-request typical case)
-        scores = regime_m.predict(X_2c)
-    else:
-        scores = global_m.predict(X_2c)
-
-    return np.clip(scores, 0.0, 1.0).astype(np.float32)
+    return np.clip(final_scores, 0.0, 1.0).astype(np.float32)
 
 
 def _conformal(raw_score: float, alpha: float = 0.10):
@@ -480,8 +518,10 @@ def predict_ensemble():
             reg_h   = float(np.clip(regime_hard_preds[i], 0, 1))
             soft_v  = float(np.clip(soft_preds[i], 0, 1))
             p2c_v   = float(np.clip(p2c_preds[i], 0, 1)) if p2c_preds is not None else None
-            stack   = _stacking(xgb_p, lgbm_p, regime_hard=reg_h, soft_blend=soft_v,
-                                p2b_prob=lgbm_p, p2c_prob=p2c_v)
+            # Phase 2c is primary scorer (AUC 0.6465 vs meta-stack 0.6116 on recent data)
+            stack   = p2c_v if p2c_v is not None else _stacking(
+                xgb_p, lgbm_p, regime_hard=reg_h, soft_blend=soft_v,
+                p2b_prob=lgbm_p, p2c_prob=p2c_v)
             lo, hi  = _conformal(stack)
 
             entry = {
