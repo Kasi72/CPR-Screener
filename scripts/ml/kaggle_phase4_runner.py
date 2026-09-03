@@ -83,7 +83,8 @@ def wait_for_dataset_ready(max_wait_s=600):
         r = _run(['kaggle', 'datasets', 'files', DATASET_SLUG], check=False, capture=True)
         out = (r.stdout or '') + (r.stderr or '')
         if 'signal_dataset.csv' in out:
-            print(f"    Dataset ready (attempt {attempt}).")
+            print(f"    Dataset ready (attempt {attempt}). Waiting 90s for version commit ...")
+            time.sleep(90)
             return
         print(f"    [{attempt}] Not ready yet. Waiting 30s ...")
         time.sleep(30)
@@ -138,7 +139,9 @@ def download_outputs():
     print("  [4/4] Downloading Phase 4 outputs ...")
     out_dir = tempfile.mkdtemp(prefix='kaggle_p4_out_')
     try:
-        _kaggle('kernels', 'output', KERNEL_SLUG, '-p', out_dir)
+        # Use check=False: kaggle CLI exits 1 on Windows charmap errors even when
+        # files download successfully. Verify files exist instead of trusting exit code.
+        _run(['kaggle', 'kernels', 'output', KERNEL_SLUG, '-p', out_dir], check=False)
 
         zips = glob.glob(os.path.join(out_dir, '*.zip'))
         if zips:
@@ -166,7 +169,7 @@ def download_outputs():
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
-def main(timeout_minutes=60, upload=True):
+def main(timeout_minutes=90, upload=True):
     print("\n" + "=" * 60)
     print("  Phase 4: Kaggle PPO Runner")
     print("=" * 60)
@@ -188,7 +191,7 @@ def main(timeout_minutes=60, upload=True):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--timeout-minutes', type=int, default=60)
+    parser.add_argument('--timeout-minutes', type=int, default=90)
     parser.add_argument('--no-upload', action='store_true',
                         help='Skip dataset upload (reuse existing Kaggle dataset)')
     args = parser.parse_args()

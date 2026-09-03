@@ -53,28 +53,28 @@ FEATURE_COLS = [
     'mom5', 'dow', 'rule_id', 'direction',
     'dist_hi52', 'dist_lo52', 'vol_accel',
     'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
-    'deliv_pct',
-    'pcr',
-    'india_vix',
-    'conf_vol',
-    'rsi_dir',
-    'hi52_dir',
-    'cpr_compress',
-    'cpr_pos',
-    'dist_r1',
-    'dist_s1',
-    'mom3',
-    'mom10',
-    'mom20',
-    'rsi_div',
-    'vol_accel_delta',
-    'days_since_52hi',
-    'expiry_dist',
-    'regime_stability',
-    'transition_risk',
-]  # 38 features
+    'deliv_pct', 'pcr', 'india_vix',
+    'conf_vol', 'rsi_dir', 'hi52_dir',
+    'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
+    'mom3', 'mom10', 'mom20',
+    'rsi_div', 'vol_accel_delta',
+    'days_since_52hi', 'expiry_dist',
+    # Sprint 1 CPR features
+    'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
+    'hmm_regime',
+    # Sprint 2A
+    'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
+    'cpr_midpoint_trend', 'cpr_expansion_factor',
+    # Sprint 2B
+    'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
+    'cpr_width_percentile_252d', 'prev_day_ochoa_type',
+    # Sprint 3
+    'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+    'atr_expansion', 'vol_trend_slope',
+]  # 56 base features
 
-STATE_DIM = len(FEATURE_COLS) + 4  # 38 + regime_score + exposure + sharpe + streak = 42
+# State: 56 signal features + lgbm2c_score + exposure + running_sharpe + win_streak
+STATE_DIM = len(FEATURE_COLS) + 4  # 56 + 4 = 60
 
 
 # ── Trading Environment ────────────────────────────────────────────────────────
@@ -82,11 +82,12 @@ STATE_DIM = len(FEATURE_COLS) + 4  # 38 + regime_score + exposure + sharpe + str
 class SignalSizingEnv(gym.Env):
     """
     Gym environment for signal position sizing.
-    State  : 38 signal features + [regime_score, exposure, running_sharpe, win_streak]
+    State  : 56 signal features + [lgbm2c_score, exposure, running_sharpe, win_streak]
     Action : Discrete(5) → [0%, 25%, 50%, 75%, 100%]
-    Reward : direction * actual_return * size - friction + win_bonus
+    Reward : delta-Sharpe (change in rolling Sharpe) — directly optimizes what matters
     """
-    ACTION_SIZES = np.array([0.0, 0.25, 0.50, 0.75, 1.00])
+    ACTION_SIZES  = np.array([0.0, 0.25, 0.50, 0.75, 1.00])
+    SHARPE_WINDOW = 50   # rolling window for reward computation
 
     def __init__(self, signals_df, mode='train'):
         super().__init__()
@@ -98,11 +99,17 @@ class SignalSizingEnv(gym.Env):
         self.action_space = spaces.Discrete(5)
         self.reset()
 
+    def _rolling_sharpe(self):
+        if len(self.returns) < 10:
+            return 0.0
+        r = np.array(self.returns[-self.SHARPE_WINDOW:])
+        return float((r.mean() / (r.std() + 1e-8)) * np.sqrt(252))
+
     def _get_obs(self):
         row  = self.df.iloc[self.idx]
         base = np.array([float(row.get(f, 0)) for f in FEATURE_COLS], dtype=np.float32)
         extra = np.array([
-            self.regime_score,
+            float(row.get('lgbm2c_score', 0.5)),   # ML confidence — primary signal quality
             self.exposure,
             np.clip(self.running_sharpe, -3, 3),
             float(self.win_streak),
@@ -118,7 +125,6 @@ class SignalSizingEnv(gym.Env):
         self.returns        = []
         self.running_sharpe = 0.0
         self.win_streak     = 0
-        self.regime_score   = 0.5
         return self._get_obs(), {}
 
     def step(self, action):
@@ -126,17 +132,19 @@ class SignalSizingEnv(gym.Env):
         size_frac  = self.ACTION_SIZES[action]
         actual_ret = float(row.get('actual_return', 0.0))
 
-        trade_reward = actual_ret * size_frac
-        trans_cost   = 0.001 * abs(action - self.prev_action)
-        win_bonus    = 0.05 if (actual_ret > 0.005 and size_frac > 0) else 0.0
-        skip_penalty = 0.0 if size_frac > 0 else (0.01 if actual_ret > 0.01 else 0.0)
-        reward       = trade_reward - trans_cost + win_bonus - skip_penalty
+        trade_return = actual_ret * size_frac
 
-        self.returns.append(trade_reward)
-        if len(self.returns) >= 10:
-            r = np.array(self.returns[-30:])
-            self.running_sharpe = (r.mean() / (r.std() + 1e-8)) * np.sqrt(252)
-        self.win_streak  = (self.win_streak + 1) if reward > 0 else 0
+        # Sharpe-delta reward: directly maximise rolling Sharpe improvement
+        prev_sharpe = self.running_sharpe
+        self.returns.append(trade_return)
+        new_sharpe  = self._rolling_sharpe()
+        self.running_sharpe = new_sharpe
+
+        sharpe_delta = new_sharpe - prev_sharpe
+        trans_cost   = 0.001 * abs(action - self.prev_action)
+        reward       = sharpe_delta - trans_cost
+
+        self.win_streak  = (self.win_streak + 1) if trade_return > 0 and size_frac > 0 else 0
         self.exposure    = size_frac
         self.prev_action = action
         self.idx         = (self.idx + 1) % self.n
@@ -145,7 +153,7 @@ class SignalSizingEnv(gym.Env):
         return self._get_obs(), float(reward), done, False, {
             'actual_return': actual_ret,
             'size': size_frac,
-            'trade_reward': trade_reward,
+            'trade_reward': trade_return,
         }
 
 
@@ -167,14 +175,15 @@ def load_data():
     print(f"Loading {csv_path} ...")
     df = pd.read_csv(csv_path)
     print(f"  {len(df):,} signals loaded.")
-    # Fill missing feature cols with 0
-    for col in FEATURE_COLS + ['actual_return']:
+    # Fill missing feature cols with 0 (lgbm2c_score default 0.5 = neutral)
+    for col in FEATURE_COLS + ['actual_return', 'lgbm2c_score']:
         if col not in df.columns:
-            df[col] = 0.0
+            df[col] = 0.5 if col == 'lgbm2c_score' else 0.0
     df[FEATURE_COLS] = df[FEATURE_COLS].fillna(0)
+    df['lgbm2c_score'] = df['lgbm2c_score'].fillna(0.5)
 
     # Encode any string columns to numeric
-    for col in FEATURE_COLS + ['actual_return']:
+    for col in FEATURE_COLS + ['actual_return', 'lgbm2c_score']:
         if col in df.columns and df[col].dtype == object:
             # rule_id: 'rule8' → 8, 'rule1' → 1, etc.
             # direction: 'BUY'/'SELL' → ordinal via category codes
@@ -219,20 +228,20 @@ def train_ppo(df_train, df_eval):
         seed=42,
     )
 
-    stop_cb = StopTrainingOnNoModelImprovement(max_no_improvement_evals=5, verbose=1)
+    stop_cb = StopTrainingOnNoModelImprovement(max_no_improvement_evals=8, verbose=1)
     eval_cb = EvalCallback(
         eval_env,
         best_model_save_path=WORK,
         log_path=WORK,
-        eval_freq=2_048,      # evaluate after every rollout (~24 evals total)
-        n_eval_episodes=1,    # one pass through eval set is sufficient
+        eval_freq=5_000,
+        n_eval_episodes=1,
         deterministic=True,
         callback_after_eval=stop_cb,
         verbose=1,
     )
 
-    print("  Training PPO (50k timesteps) ...")
-    model.learn(total_timesteps=50_000, callback=eval_cb)
+    print("  Training PPO (200k timesteps) ...")
+    model.learn(total_timesteps=200_000, callback=eval_cb)
 
     best_path = os.path.join(WORK, 'best_model')
     if os.path.exists(best_path + '.zip'):
