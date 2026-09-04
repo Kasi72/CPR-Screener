@@ -361,6 +361,7 @@ let sectorSymbolMap = {};  // { stockSymbol: sectorTicker }
 // ─── DELIVERY % CACHE ────────────────────────────────────────────────────────
 let delivMap  = {};   // { symbol: deliv_pct 0-1 }
 let delivDate = '';   // last loaded date YYYY-MM-DD
+let bhavPrevMap = {}; // { symbol: {open,high,low,close,volume} } — from bhav copy, free prevPeriod for daily
 
 // ─── NSE PCR CACHE ───────────────────────────────────────────────────────────
 let niftyPCR     = 1.0;
@@ -458,19 +459,33 @@ async function loadBhavCopy() {
       const delivIdx  = header.indexOf('DELIV_PER');
       const seriesIdx = header.indexOf('SERIES');
       if (symIdx < 0 || delivIdx < 0) continue;
-      const map = {};
+      const openIdx  = header.indexOf('OPEN_PRICE');
+      const highIdx  = header.indexOf('HIGH_PRICE');
+      const lowIdx   = header.indexOf('LOW_PRICE');
+      const closeIdx = header.indexOf('CLOSE_PRICE');
+      const volIdx   = header.indexOf('TOT_TRAD_QTY');
+      const map = {}, ohlcMap = {};
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',');
         if (!cols[symIdx]) continue;
         if (seriesIdx >= 0 && cols[seriesIdx]?.trim().replace(/"/g, '') !== 'EQ') continue;
         const sym = cols[symIdx].trim().replace(/"/g, '');
+        if (!sym) continue;
         const dp  = parseFloat(cols[delivIdx]);
-        if (sym && !isNaN(dp)) map[sym] = dp / 100;
+        if (!isNaN(dp)) map[sym] = dp / 100;
+        // Cache full OHLCV so daily getPrev is free (no per-stock API call)
+        if (openIdx >= 0 && highIdx >= 0 && lowIdx >= 0 && closeIdx >= 0) {
+          const o = parseFloat(cols[openIdx]), h = parseFloat(cols[highIdx]);
+          const l = parseFloat(cols[lowIdx]),  c = parseFloat(cols[closeIdx]);
+          const v = volIdx >= 0 ? parseInt(cols[volIdx]) || 0 : 0;
+          if (c && h && l) ohlcMap[sym] = { open: o||c, high: h, low: l, close: c, volume: v };
+        }
       }
       if (Object.keys(map).length > 100) {
-        delivMap  = map;
-        delivDate = key;
-        console.log(`  Bhav copy: ${key}, ${Object.keys(delivMap).length} symbols`);
+        delivMap    = map;
+        bhavPrevMap = ohlcMap;
+        delivDate   = key;
+        console.log(`  Bhav copy: ${key}, ${Object.keys(delivMap).length} symbols, ${Object.keys(bhavPrevMap).length} OHLCV cached`);
         return;
       }
     } catch(e) { /* try next date */ }
@@ -950,32 +965,36 @@ const TF = {
   '1d': {
     label: '1 Day', tvInterval: 'D',
     getPrev: async (sym) => {
-      // Try NSE first (authoritative, unadjusted prices)
+      // Priority 1: bhav copy OHLCV cache — loaded once for ALL symbols, zero per-stock cost
+      if (bhavPrevMap[sym]) return bhavPrevMap[sym];
+      // Priority 2: Yahoo Finance (1 request, fast)
       try {
-        const bars = await fetchNSEDailyBars(sym, 10);
+        const d = await fetchYahoo(sym, '1d', '5d');
+        const bars = extractBars(d);
         if (bars.length >= 1) {
           const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
           const lastTs = bars[bars.length - 1].time;
-          // If bars[-1] is today's partial bar, yesterday = bars[-2]
-          // If bars[-1] is yesterday (NSE hasn't pushed today yet), yesterday = bars[-1]
           if (lastTs >= todayMidnight.getTime()) {
             if (bars.length >= 2) return bars[bars.length - 2];
           } else {
             return bars[bars.length - 1];
           }
         }
-      } catch(e) { console.warn(`[NSE] getPrev fallback for ${sym}: ${e.message}`); }
-      // Fallback: Yahoo Finance
-      const d = await fetchYahoo(sym, '1d', '5d');
-      const bars = extractBars(d);
-      if (bars.length < 1) throw new Error('No daily history');
-      const todayMidnight2 = new Date(); todayMidnight2.setHours(0,0,0,0);
-      const lastTs2 = bars[bars.length - 1].time;
-      if (lastTs2 >= todayMidnight2.getTime()) {
-        if (bars.length < 2) throw new Error('No daily history');
-        return bars[bars.length - 2];
-      }
-      return bars[bars.length - 1];
+      } catch(e) {}
+      // Priority 3: NSE API (authoritative but slow — fallback only)
+      try {
+        const bars = await fetchNSEDailyBars(sym, 10);
+        if (bars.length >= 1) {
+          const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+          const lastTs = bars[bars.length - 1].time;
+          if (lastTs >= todayMidnight.getTime()) {
+            if (bars.length >= 2) return bars[bars.length - 2];
+          } else {
+            return bars[bars.length - 1];
+          }
+        }
+      } catch(e) {}
+      throw new Error(`getPrev failed for ${sym}`);
     },
     getCurrent: async (sym) => {
       // Try NSE: historical bars + today's live quote bar
@@ -1046,9 +1065,12 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     // Fetch current data + 1y history in parallel for quality gates
     // For daily timeframe: fetch 1y NSE history for quality gates (ATR/ADX/EMA/Kalman)
     // Other timeframes: Yahoo Finance (NSE doesn't have intraday/weekly API)
-    const histFetch = (timeframe === '1d')
-      ? fetchNSEDailyBars(symbol, 365).catch(() => fetchYahoo(symbol, '1d', '1y').catch(() => null))
-      : fetchYahoo(symbol, '1d', '1y').catch(() => null);
+    // Yahoo-first for history (1 request vs 4 chunked NSE requests); NSE fallback only if Yahoo fails
+    const histFetch = fetchYahoo(symbol, '1d', '1y').catch(() =>
+      timeframe === '1d'
+        ? fetchNSEDailyBars(symbol, 365).catch(() => null)
+        : Promise.resolve(null)
+    );
 
     const [prevPeriod, currentBars, histDataRaw] = await Promise.all([
       tf.getPrev(symbol),
@@ -1798,7 +1820,7 @@ app.get('/api/screen/stream', async (req, res) => {
 
   let done = 0, matched = 0;
   const t0 = Date.now();
-  const BATCH = 5;
+  const BATCH = 15;
 
   for (let i = 0; i < symbols.length; i += BATCH) {
     if (res.writableEnded) break;
@@ -1831,7 +1853,7 @@ app.get('/api/screen/stream', async (req, res) => {
       }
     }
 
-    if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 120));
+    if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 30));
   }
 
   emit({ type: 'done', total: symbols.length, matched, elapsed: Date.now() - t0 });
