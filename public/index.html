@@ -2379,7 +2379,9 @@ const App = {
 
     // Confluence score
     const cs = stock.confluenceScore;
-    const csTag = cs != null ? `<span style="font-family:var(--mono);font-size:10px;color:${cs>=3.5?'#4ade80':cs>=2?'#facc15':'#f87171'};margin-left:4px" title="Confluence score (Sharpe-weighted fired rules)">⚡${cs.toFixed(1)}</span>` : '';
+    const cp = stock.confluencePass;
+    const cpMark = cp === true ? '<span style="color:#4ade80;font-weight:900">✓</span>' : cp === false ? '<span style="color:#f87171;font-weight:900">✗</span>' : '';
+    const csTag = cs != null ? `<span style="font-family:var(--mono);font-size:10px;color:${cs>=3.5?'#4ade80':cs>=2?'#facc15':'#f87171'};margin-left:4px" title="Confluence score (Sharpe-weighted fired rules)${cp!=null?' — '+(cp?'PASS (STRONG BUY eligible)':'FAIL (STRONG BUY blocked)'):''}">⚡${cs.toFixed(1)}${cpMark}</span>` : '';
 
     // Exit levels summary for best quality-passed rule
     const bestExitRule = qpr.find(r => exits[r]);

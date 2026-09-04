@@ -1610,7 +1610,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         : mlEngine.getConfidenceInterval(Object.values(predReturnByRule)[0] || 0);
       mlResult = {
         regime:       currentRegime,
-        regimeScore,
+        regimeScore:  ensRes && ensRes.regimeScore != null ? ensRes.regimeScore : regimeScore,
         regimeAllowed,
         stackScore:   ensRes ? ensRes.stackScore : null,
         xgbScore:     ensRes ? ensRes.xgbScore   : null,
