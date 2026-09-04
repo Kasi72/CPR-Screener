@@ -2610,7 +2610,7 @@ const App = {
       'MatchedRules','MatchCount'
     ];
     const rows = State.results.map(s => {
-      const rec = computeRec(s);
+      const rec = computeRecommendation(s);
       const ml  = s.ml || {};
       const gg  = s.globalGates || {};
       return [
