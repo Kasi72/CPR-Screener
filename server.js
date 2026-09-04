@@ -1204,6 +1204,128 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       const _curRegime = mlEngine.getCurrentRegime();
       const hmm_regime_feat = _regimeInt[_curRegime] ?? 2;
 
+      // ── Rolling CPR history (Sprint 1/2 CPR depth features) ──────────────────
+      // histBars[n-1] = yesterday bar (= prevPeriod used to build today's cpr)
+      // histBars[n-2] = day-before-yesterday → source for prev_cpr (yesterday's CPR)
+      const _n = histBars.length;
+      const _rollingCPR = idx => {
+        if (idx < 0 || idx >= _n) return null;
+        const b = histBars[idx];
+        return calcCPR(b.high, b.low, b.close);
+      };
+      const prev_cpr = _rollingCPR(_n - 2);
+      const _ydayClose = _n >= 1 ? histBars[_n - 1].close : last.close;
+
+      // cpr_compress: today CPR width / 5-day avg CPR width
+      let cpr_compress = 1;
+      if (_n >= 7 && cpr.width > 0) {
+        const p5w = [-2,-3,-4,-5,-6].map(i => { const c = _rollingCPR(_n + i); return c ? c.width : cpr.width; });
+        const avg5w = p5w.reduce((a, b) => a + b, 0) / 5;
+        cpr_compress = avg5w > 0 ? cpr.width / avg5w : 1;
+      }
+
+      // cpr_overlap_pct: overlap between today and yesterday CPR / today CPR width
+      let cpr_overlap_pct = 0;
+      if (prev_cpr && cpr.width > 0) {
+        const ol = Math.max(0, Math.min(cpr.upper, prev_cpr.upper) - Math.max(cpr.lower, prev_cpr.lower));
+        cpr_overlap_pct = ol / cpr.width;
+      }
+
+      const cpr_expansion_factor = (prev_cpr && prev_cpr.width > 0) ? cpr.width / prev_cpr.width : 1;
+      const cpr_above_prev_cpr   = (prev_cpr && cpr.lower > prev_cpr.upper) ? 1 : 0;
+
+      // prev_close_inside_cpr: yesterday close inside today's CPR band
+      const prev_close_inside_cpr = (_ydayClose >= cpr.lower && _ydayClose <= cpr.upper) ? 1 : 0;
+
+      // cpr_midpoint_trend: OLS slope of 5 prior CPR midpoints (normalized)
+      let cpr_midpoint_trend = 0;
+      if (_n >= 7) {
+        const mids = [-6,-5,-4,-3,-2].map(i => { const c = _rollingCPR(_n + i); return c ? (c.bc + c.tc) / 2 : 0; });
+        const ref = mids[0] || 1;
+        const nm = mids.map(m => m / ref - 1);
+        const nLen = nm.length, sx = nLen*(nLen-1)/2, sx2 = nLen*(nLen-1)*(2*nLen-1)/6;
+        const sy = nm.reduce((a,b)=>a+b,0), sxy = nm.reduce((s,v,i)=>s+i*v,0);
+        const den = nLen*sx2 - sx*sx;
+        cpr_midpoint_trend = den !== 0 ? (nLen*sxy - sx*sy) / den : 0;
+      }
+
+      // consecutive_narrow_cprs: bars of consecutive prior CPRs narrower than today's
+      let consecutive_narrow_cprs = 0;
+      for (let i = _n - 2; i >= Math.max(0, _n - 11); i--) {
+        const c = _rollingCPR(i);
+        if (c && c.widthPct < cpr.widthPct) consecutive_narrow_cprs++;
+        else break;
+      }
+
+      // cpr_width_percentile_252d: today CPR width percentile in last 252 days
+      let cpr_width_percentile_252d = 0.5;
+      if (_n >= 20) {
+        const lookback = Math.min(252, _n - 1);
+        const ws = [];
+        for (let i = _n - 1 - lookback; i < _n - 1; i++) { const c = _rollingCPR(i); if (c) ws.push(c.width); }
+        if (ws.length > 0) {
+          ws.sort((a, b) => a - b);
+          cpr_width_percentile_252d = ws.filter(w => w <= cpr.width).length / ws.length;
+        }
+      }
+
+      // open_to_cpr_dist: (open - CPR midpoint) / CPR width
+      const _cprMid = (cpr.bc + cpr.tc) / 2;
+      const open_to_cpr_dist = cpr.width > 0 ? (last.open - _cprMid) / cpr.width : 0;
+      const open_inside_cpr  = (last.open >= cpr.lower && last.open <= cpr.upper) ? 1 : 0;
+
+      // atr_to_cpr_ratio: ATR14 / CPR width
+      const _atr14 = (() => {
+        if (hHighs.length < 2) return hHighs.length ? hHighs[0] - hLows[0] : 0;
+        const len = Math.min(14, hHighs.length - 1);
+        let s = 0;
+        for (let i = hHighs.length - len; i < hHighs.length; i++) {
+          const pc = hCloses[i - 1];
+          s += Math.max(hHighs[i] - hLows[i], Math.abs(hHighs[i] - pc), Math.abs(hLows[i] - pc));
+        }
+        return s / len;
+      })();
+      const atr_to_cpr_ratio = cpr.width > 0 ? _atr14 / cpr.width : 1;
+
+      // prev_cpr_respected: yesterday close inside yesterday's CPR
+      const prev_cpr_respected = (prev_cpr && _ydayClose >= prev_cpr.lower && _ydayClose <= prev_cpr.upper) ? 1 : 0;
+
+      // prev_bar_close_pos: yesterday close position within yesterday's CPR (0=below bc, 1=above tc)
+      let prev_bar_close_pos = 0.5;
+      if (prev_cpr && (prev_cpr.tc - prev_cpr.bc) > 0) {
+        prev_bar_close_pos = Math.max(0, Math.min(1, (_ydayClose - prev_cpr.bc) / (prev_cpr.tc - prev_cpr.bc)));
+      }
+
+      // prev_day_ochoa_type: yesterday candle body classification (0=doji,1=bearish,2=neutral,3=bullish)
+      let prev_day_ochoa_type = 2;
+      if (_n >= 1) {
+        const yb = histBars[_n - 1];
+        const range = yb.high - yb.low;
+        if (range > 0) {
+          const bodyPct = Math.abs(yb.close - yb.open) / range;
+          if (bodyPct < 0.1)        prev_day_ochoa_type = 0;
+          else if (yb.close > yb.open) prev_day_ochoa_type = bodyPct > 0.6 ? 3 : 2;
+          else                         prev_day_ochoa_type = bodyPct > 0.6 ? 1 : 2;
+        }
+      }
+
+      // rsi_div: RSI divergence — price and RSI moving in opposite directions (-1/0/1)
+      let rsi_div = 0;
+      if (hCloses.length >= 6) {
+        const priceSlope = hCloses[hCloses.length - 1] - hCloses[hCloses.length - 6];
+        const rsi5ago    = calcRSI(hCloses.slice(0, hCloses.length - 5), 14);
+        if      (priceSlope > 0 && xRsi14 < rsi5ago) rsi_div = -1;
+        else if (priceSlope < 0 && xRsi14 > rsi5ago) rsi_div =  1;
+      }
+
+      // vol_accel_delta: change in vol_accel vs prior bar
+      let vol_accel_delta = 0;
+      if (hVols.length >= 21) {
+        const vol3p  = (hVols[hVols.length-2] + hVols[hVols.length-3] + hVols[hVols.length-4]) / 3;
+        const vol20p = hVols.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
+        vol_accel_delta = vol_accel - (vol20p > 0 ? vol3p / vol20p : 1);
+      }
+
       featureList = rulesToPredict.map(rid => {
         const direction  = getRuleDirection(rid, cpr, cam, last.close, prevClose, periodHigh, periodLow);
         const ruleNum    = parseInt(rid.replace('rule', ''));
@@ -1235,7 +1357,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           conf_vol,
           rsi_dir,
           hi52_dir,
-          // Sprint 3 + momentum features (closes inference-training gap)
+          // Sprint 3 + momentum features
           cpr_pos:        (cpr.tc - cpr.bc) > 0 ? (last.close - cpr.bc) / (cpr.tc - cpr.bc) : 0.5,
           dist_r1:        last.close > 0 ? (last.close - cam.r1) / last.close : 0,
           dist_s1:        last.close > 0 ? (last.close - cam.s1) / last.close : 0,
@@ -1248,6 +1370,26 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           days_since_52hi,
           expiry_dist,
           hmm_regime:     hmm_regime_feat,
+          // Sprint 1 CPR depth features
+          cpr_overlap_pct,
+          open_to_cpr_dist,
+          prev_cpr_respected,
+          // Sprint 2A CPR depth features
+          open_inside_cpr,
+          consecutive_narrow_cprs,
+          cpr_midpoint_trend,
+          cpr_expansion_factor,
+          // Sprint 2B CPR depth features
+          cpr_above_prev_cpr,
+          prev_close_inside_cpr,
+          atr_to_cpr_ratio,
+          cpr_width_percentile_252d,
+          prev_day_ochoa_type,
+          // Additional computable features
+          cpr_compress,
+          rsi_div,
+          vol_accel_delta,
+          prev_bar_close_pos,
         };
       });
 
