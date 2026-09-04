@@ -1617,10 +1617,18 @@ function computeRecommendation(stock) {
   const spread    = r3 - s3;
   const atr_proxy = spread > 0 ? spread / 4.0 : price * 0.01;
 
+  // Prefer ML-derived direction (from best-scoring rule) for consistency with stackScore.
+  // Fall back to CPR position for stocks with no ML inference.
   let direction;
-  if (price > tc)      direction = 'LONG';
-  else if (price < bc) direction = 'SHORT';
-  else                 direction = 'NEUTRAL';
+  if (ml.mlDirection != null) {
+    direction = ml.mlDirection === 1 ? 'LONG' : ml.mlDirection === -1 ? 'SHORT' : 'NEUTRAL';
+  } else if (price > tc) {
+    direction = 'LONG';
+  } else if (price < bc) {
+    direction = 'SHORT';
+  } else {
+    direction = 'NEUTRAL';
+  }
 
   if (direction === 'NEUTRAL') {
     return { tier:'NEUTRAL', direction, confidence:0, rr:0,

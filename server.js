@@ -1591,12 +1591,21 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     const regimeAllowed = mlEngine.isRegimeAllowed(currentRegime);
 
     if (rulesToPredict.length > 0 && featureList && featureList.length > 0) {
-      const firstFeat = featureList[0];
-      const [ensRes, posSize] = await Promise.all([
-        mlEngine.getEnsembleScore(firstFeat).catch(() => null),
-        mlEngine.getPositionSize(firstFeat, currentRegime).catch(() => 0.5),
-      ]);
-      const confInt = ensRes
+      // Score every matched rule; pick the one with the highest stackScore.
+      // Pure-JS inference is fast (~1ms/call) so scoring all rules is fine.
+      const ensResults = await Promise.all(
+        featureList.map(f => mlEngine.getEnsembleScore(f).catch(() => null))
+      );
+      const ensRes = ensResults.reduce((best, r) => {
+        if (!r) return best;
+        if (!best || r.stackScore > best.stackScore) return r;
+        return best;
+      }, null);
+      // Use the feature set of the best-scoring rule for PPO sizing
+      const bestIdx  = ensResults.findIndex(r => r && ensRes && r.stackScore === ensRes.stackScore);
+      const bestFeat = featureList[bestIdx >= 0 ? bestIdx : 0];
+      const posSize  = await mlEngine.getPositionSize(bestFeat, currentRegime).catch(() => 0.5);
+      const confInt  = ensRes
         ? { lower: ensRes.confLower, upper: ensRes.confUpper }
         : mlEngine.getConfidenceInterval(Object.values(predReturnByRule)[0] || 0);
       mlResult = {
@@ -1609,6 +1618,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         confLower:    confInt.lower,
         confUpper:    confInt.upper,
         positionSize: posSize,
+        mlDirection:  bestFeat.direction,   // 1=BUY rule, -1=SELL rule
       };
     } else {
       mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5 };
