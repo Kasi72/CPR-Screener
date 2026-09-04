@@ -260,7 +260,7 @@ async function fetchNSEQuoteBar(symbol) {
     high:   p.intraDayHighLow?.max || p.lastPrice,
     low:    p.intraDayHighLow?.min || p.lastPrice,
     close:  p.lastPrice,
-    volume: data.marketDeptOrderBook?.totalSellQuantity || 0
+    volume: data.marketDeptOrderBook?.tradeInfo?.totalTradedVolume || 0
   };
 }
 
@@ -1009,10 +1009,12 @@ const TF = {
   '1w': {
     label: '1 Week', tvInterval: 'W',
     getPrev: async (sym) => {
+      // Yahoo '1wk' bars are already weekly aggregates — bars[-1] is current week,
+      // bars[-2] is the previous complete week whose H/L/C defines weekly CPR
       const d = await fetchYahoo(sym, '1wk', '1y');
       const bars = extractBars(d);
-      if (bars.length < 5) return bars[bars.length - 2] || bars[0];
-      return aggregateBars(bars.slice(-5, -1));
+      if (bars.length < 2) return bars[bars.length - 1] || bars[0];
+      return bars[bars.length - 2];
     },
     getCurrent: async (sym) => {
       const d = await fetchYahoo(sym, '1wk', '6mo');
@@ -1022,10 +1024,12 @@ const TF = {
   '1M': {
     label: '1 Month', tvInterval: 'M',
     getPrev: async (sym) => {
+      // Yahoo '1mo' bars are monthly aggregates — bars[-1] is current (incomplete) month,
+      // bars[-2] is previous complete month whose H/L/C defines monthly CPR
       const d = await fetchYahoo(sym, '1mo', '3y');
       const bars = extractBars(d);
-      if (bars.length < 13) return bars[bars.length - 2] || bars[0];
-      return aggregateBars(bars.slice(-13, -1));
+      if (bars.length < 2) return bars[bars.length - 1] || bars[0];
+      return bars[bars.length - 2];
     },
     getCurrent: async (sym) => {
       const d = await fetchYahoo(sym, '1mo', '2y');
