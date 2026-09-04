@@ -1752,6 +1752,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       ml: mlResult,
     };
   } catch (err) {
+    console.error(`[processSymbol] ${symbol}: ${err.message}`);
     return { symbol, error: err.message };
   }
 }
@@ -1832,7 +1833,7 @@ app.get('/api/screen/stream', async (req, res) => {
     for (const result of results) {
       done++;
       if (result.error) {
-        emit({ type: 'err', done, total: symbols.length, sym: result.symbol });
+        emit({ type: 'err', done, total: symbols.length, sym: result.symbol, msg: result.error });
         continue;
       }
 

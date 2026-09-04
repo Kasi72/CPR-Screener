@@ -2259,6 +2259,7 @@ const App = {
         if (msg.type === 'err') {
           State.errors++;
           State.scanned = msg.done;
+          console.warn(`[screener err] ${msg.sym}: ${msg.msg}`);
         }
 
         if (msg.type === 'done') {
