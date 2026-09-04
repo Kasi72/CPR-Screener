@@ -343,6 +343,29 @@ let niftyMap      = {};   // { 'YYYY-MM-DD': niftyClose }
 let niftyEma20Map = {};   // { 'YYYY-MM-DD': ema20 }
 let niftyBarsCache= [];   // raw OHLCV for HMM regime computation
 
+// ─── SECTOR INDEX BARS + SYMBOL MAP ──────────────────────────────────────────
+const SECTOR_INDICES = {
+  '^NSEBANK':   'ind_niftybanklist.csv',
+  '^CNXAUTO':   'ind_niftyautolist.csv',
+  '^CNXIT':     'ind_niftyitlist.csv',
+  '^CNXPHARMA': 'ind_niftypharmalist.csv',
+  '^CNXFMCG':   'ind_niftyfmcglist.csv',
+  '^CNXMETAL':  'ind_niftymetallist.csv',
+  '^CNXENERGY': 'ind_niftyenergylist.csv',
+  '^CNXREALTY': 'ind_niftyrealtylist.csv',
+  '^CNXMEDIA':  'ind_niftymedialist.csv',
+};
+let sectorBarsCache = {};  // { sectorTicker: [{close}...] }  sorted by date asc
+let sectorSymbolMap = {};  // { stockSymbol: sectorTicker }
+
+// ─── DELIVERY % CACHE ────────────────────────────────────────────────────────
+let delivMap  = {};   // { symbol: deliv_pct 0-1 }
+let delivDate = '';   // last loaded date YYYY-MM-DD
+
+// ─── NSE PCR CACHE ───────────────────────────────────────────────────────────
+let niftyPCR     = 1.0;
+let pcrLoadTime  = 0;
+
 const mlEngine = require('./ml_engine');
 
 function dateStr(tsMs) {
@@ -389,18 +412,106 @@ async function loadIndexData() {
   }
 }
 
+async function loadSectorData() {
+  // Fetch constituent CSVs from public NSE archives to build stock→sector map
+  for (const [ticker, csvFile] of Object.entries(SECTOR_INDICES)) {
+    try {
+      const url  = `https://nsearchives.nseindia.com/content/indices/${csvFile}`;
+      const body = await httpsGet(url);
+      for (const line of body.split('\n').slice(1)) {
+        const sym = line.split(',')[0]?.trim().replace(/"/g, '');
+        if (sym && sym.length > 0) sectorSymbolMap[sym] = ticker;
+      }
+    } catch(e) {
+      console.warn(`  Sector CSV [${ticker}] failed: ${e.message}`);
+    }
+  }
+  console.log(`  Sector map: ${Object.keys(sectorSymbolMap).length} stocks`);
+
+  // Fetch 1-year daily bars for each sector index from Yahoo Finance
+  for (const ticker of Object.keys(SECTOR_INDICES)) {
+    try {
+      const data = await fetchYahooIndex(ticker, '1d', '1y');
+      const bars = extractBars(data);
+      sectorBarsCache[ticker] = bars.filter(b => b.close).map(b => b.close);
+    } catch(e) {
+      console.warn(`  Sector bars [${ticker}] failed: ${e.message}`);
+    }
+  }
+}
+
+async function loadBhavCopy() {
+  // Try today then yesterday (bhav copy available ~6PM IST after market close)
+  for (let offset = 0; offset <= 1; offset++) {
+    const d    = new Date(Date.now() - offset * 86400000);
+    const dd   = String(d.getDate()).padStart(2, '0');
+    const mm   = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const key  = `${yyyy}-${mm}-${dd}`;
+    if (delivDate === key) return;
+    try {
+      const url  = `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${dd}${mm}${yyyy}.csv`;
+      const body = await httpsGet(url);
+      const lines  = body.split('\n');
+      const header = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      const symIdx    = header.indexOf('SYMBOL');
+      const delivIdx  = header.indexOf('DELIV_PER');
+      const seriesIdx = header.indexOf('SERIES');
+      if (symIdx < 0 || delivIdx < 0) continue;
+      const map = {};
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        if (!cols[symIdx]) continue;
+        if (seriesIdx >= 0 && cols[seriesIdx]?.trim().replace(/"/g, '') !== 'EQ') continue;
+        const sym = cols[symIdx].trim().replace(/"/g, '');
+        const dp  = parseFloat(cols[delivIdx]);
+        if (sym && !isNaN(dp)) map[sym] = dp / 100;
+      }
+      if (Object.keys(map).length > 100) {
+        delivMap  = map;
+        delivDate = key;
+        console.log(`  Bhav copy: ${key}, ${Object.keys(delivMap).length} symbols`);
+        return;
+      }
+    } catch(e) { /* try next date */ }
+  }
+  console.warn('  Bhav copy unavailable (holiday or pre-6PM)');
+}
+
+async function loadPCR() {
+  try {
+    const data = await nseApiGet('/api/option-chain-indices?symbol=NIFTY');
+    const ce   = data?.filtered?.CE?.totOI || 0;
+    const pe   = data?.filtered?.PE?.totOI || 0;
+    if (ce > 0) {
+      niftyPCR    = pe / ce;
+      pcrLoadTime = Date.now();
+      console.log(`  Nifty PCR: ${niftyPCR.toFixed(3)}`);
+    }
+  } catch(e) {
+    console.warn(`  PCR load failed: ${e.message}`);
+  }
+}
+
 // Load at startup; refresh every 6 hours
 mlEngine.init();
-loadIndexData().then(() => {
-  // Compute initial HMM regime from Nifty bars
+Promise.all([
+  loadIndexData(),
+  loadSectorData(),
+  loadBhavCopy(),
+]).then(() => {
   if (niftyBarsCache.length >= 10) {
     const r = mlEngine.computeRegime(niftyBarsCache);
     console.log(`  ML Regime: ${r.regime} (score=${r.score})`);
   }
+  // PCR needs NSE session — load after session is warmed by index data
+  loadPCR().catch(() => {});
   setInterval(() => {
     loadIndexData().then(() => {
       if (niftyBarsCache.length >= 10) mlEngine.computeRegime(niftyBarsCache);
     });
+    loadBhavCopy().catch(() => {});
+    loadPCR().catch(() => {});
   }, 6 * 60 * 60 * 1000);
 });
 
@@ -1437,6 +1548,23 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           market_rs_20d,
           // Sprint 3 CPR test count
           cpr_test_count_5d,
+          // Sector RS vs own sector index
+          sector_rs_5d:  (() => {
+            const st = sectorSymbolMap[symbol]; if (!st) return market_rs_5d;
+            const sc = sectorBarsCache[st];     if (!sc || sc.length < 6) return market_rs_5d;
+            const sn = sc[sc.length-1], s5 = sc[sc.length-6];
+            return s5 > 0 ? (hCloses[hCloses.length-1]/hCloses[hCloses.length-6]) - (sn/s5) : market_rs_5d;
+          })(),
+          sector_rs_20d: (() => {
+            const st = sectorSymbolMap[symbol]; if (!st) return market_rs_20d;
+            const sc = sectorBarsCache[st];     if (!sc || sc.length < 21) return market_rs_20d;
+            const sn = sc[sc.length-1], s20 = sc[sc.length-21];
+            return s20 > 0 ? (hCloses[hCloses.length-1]/hCloses[hCloses.length-21]) - (sn/s20) : market_rs_20d;
+          })(),
+          // NSE delivery % (from bhav copy, EOD only)
+          deliv_pct: delivMap[symbol] ?? 0,
+          // Nifty Put-Call Ratio (single value for all stocks)
+          pcr: niftyPCR,
         };
       });
 
