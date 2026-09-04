@@ -1249,6 +1249,7 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
 .rec-NEUTRAL     { background: rgba(107,114,128,0.1); color: #9ca3af; border: 1px solid rgba(107,114,128,0.25); }
 .rec-AVOID       { background: rgba(239,68,68,0.1);   color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
 .rec-conf        { font-size: 9px; opacity: 0.7; margin-left: 4px; font-weight: 600; }
+.rec-pos         { font-size: 8px; opacity: 0.6; margin-left: 5px; font-style: italic; }
 
 /* ── REC DETAIL PANEL ──────────────────────────────────── */
 .rec-detail-row td {
@@ -1604,12 +1605,12 @@ function _rw(key) {
   return _REC_W_DEFAULTS[key] ?? 0;
 }
 
-// ─── BUY/SELL RECOMMENDATION ENGINE ──────────────────────────────────────────
+// ─── BUY/SELL RECOMMENDATION ENGINE (ML-integrated v2) ───────────────────────
 function computeRecommendation(stock) {
-  const cpr   = stock.cpr   || {};
-  const cam   = stock.camarilla || {};
-  const ml    = stock.ml    || {};
-  const price = stock.price || 0;
+  const cpr   = stock.cpr        || {};
+  const cam   = stock.camarilla  || {};
+  const ml    = stock.ml         || {};
+  const price = stock.price      || 0;
   const tc = cpr.tc || 0, bc = cpr.bc || 0;
   const r3 = cam.r3 || 0, s3 = cam.s3 || 0;
 
@@ -1627,118 +1628,72 @@ function computeRecommendation(stock) {
              atr:atr_proxy, why:['Price inside CPR — no directional bias'] };
   }
 
-  // ── CPR width ─────────────────────────────────────────────────────────────
-  const narrowThresh = typeof State!=='undefined' ? (State.narrowThreshold||0.5) : 0.5;
-  const isNarrow     = cpr.widthPct < narrowThresh;
-  const isWide       = cpr.widthPct > narrowThresh * 1.5;
+  // ── Priority 1: lgbm2c_score as primary confidence (replaces AUC-0.572 logistic weights) ──
+  const stackScore   = ml.stackScore != null ? ml.stackScore : 0.5;
+  const conf         = Math.round(stackScore * 100);   // 0–100
+  const why          = [`LGBM2c score ${(stackScore*100).toFixed(1)}% → conf ${conf}`];
 
-  // ── Momentum / extension ──────────────────────────────────────────────────
-  const chg        = Math.abs(stock.change || 0);
-  const isExtended = chg > 2.5;
-  const mildExt    = chg > 1.5 && chg <= 2.5;
+  // ── Priority 2: regime-graded multiplier (not binary gate) ───────────────
+  const regime       = ml.regime || '';
+  const regimeMult   = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.7, 'Chop': 0.4, 'High-Vol-Panic': 0.0 }[regime] ?? 0.6;
+  const regimeAllowed = ml.regimeAllowed !== false;
+  why.push(`Regime: ${regime || 'Unknown'} (×${regimeMult})`);
 
-  // ── VWAP alignment ────────────────────────────────────────────────────────
-  const vwap       = stock.vwap || 0;
-  const vwapAligned = vwap > 0 && ((direction==='LONG' && price>vwap)||(direction==='SHORT' && price<vwap));
-  const vwapOpposed = vwap > 0 && ((direction==='LONG' && price<vwap)||(direction==='SHORT' && price>vwap));
+  // ── Priority 3: server-computed ML-adaptive T1/T2/T3 (preferred) ─────────
+  // Use primaryExit (best-rule XGB selection) if available, else fallback to CPR geometry
+  const px = stock.primaryExit || null;
+  let entry, sl, t1, t2, t3;
 
-  // ── ATR proxy (volatility) ────────────────────────────────────────────────
-  const atrPct      = price > 0 ? (atr_proxy / price) : 0;
-  const atrHigh     = atrPct > 0.012;   // >1.2% of price = high ATR rank proxy
-
-  // ── ML signals ────────────────────────────────────────────────────────────
-  const stackScore  = ml.stackScore || 0;
-  const pred        = stock.predReturnByRule || {};
-  const bestPred    = Object.values(pred).length ? Math.max(...Object.values(pred)) : 0;
-
-  // ── Quality rules ─────────────────────────────────────────────────────────
-  const qpr         = stock.qualityPassedRules || stock.matchedRules || [];
-
-  // ── Momentum direction ────────────────────────────────────────────────────
-  const momAligned  = (direction==='LONG' && (stock.change||0)>0) ||
-                      (direction==='SHORT' && (stock.change||0)<0);
-
-  // ── EMA alignment proxy (use ML regime as EMA proxy) ─────────────────────
-  const regime      = ml.regime || '';
-  const emaAligned  = (direction==='LONG'  && regime==='Bull-Trend') ||
-                      (direction==='SHORT' && regime==='Bear-Trend');
-  const emaOpposed  = (direction==='LONG'  && (regime==='Bear-Trend'||regime==='High-Vol-Panic')) ||
-                      (direction==='SHORT' && regime==='Bull-Trend');
-
-  // ── Scoring with empirical weights ───────────────────────────────────────
-  let conf = 0;
-  const why = [];
-
-  const _add = (pts, label) => { conf += pts; why.push(`${label} (${pts>0?'+':''}${pts})`); };
-
-  // CPR width (strongest signal in data)
-  if (isWide)       _add(_rw('wide_cpr'),    'Wide CPR');
-  else if (isNarrow) _add(_rw('narrow_cpr'), 'Narrow CPR');
-
-  // Extension / momentum
-  if (isExtended)        _add(_rw('extended'),     'Extended >2.5%');
-  else if (mildExt)      _add(_rw('mild_ext'),     'Mild ext 1.5-2.5%');
-  else                   _add(_rw('not_extended'), 'Not extended');
-
-  // Momentum direction
-  if (momAligned)        _add(_rw('mom_aligned'),  'Momentum aligned');
-  else                   _add(_rw('mom_opposed'),  'Momentum opposed');
-
-  // VWAP
-  if (vwapAligned)       _add(_rw('vwap_aligned'), 'VWAP aligned');
-  else if (vwapOpposed)  _add(_rw('vwap_opposed'), 'VWAP opposed');
-
-  // EMA proxy (HMM regime)
-  if (emaAligned)        _add(_rw('ema_aligned'),  'Regime/EMA aligned');
-  else if (emaOpposed)   _add(_rw('ema_opposed'),  'Regime/EMA opposed');
-
-  // ATR proxy
-  if (atrHigh)           _add(_rw('atr_high'),     'High volatility');
-
-  // Quality rules
-  if (qpr.length >= 3)        _add(_rw('rules_3plus'), qpr.length+' quality rules');
-  else if (qpr.length === 2)  _add(_rw('rules_2'),     '2 quality rules');
-  else if (qpr.length === 1)  _add(_rw('rules_1'),     '1 quality rule');
-
-  // ML stack score (proxy for volume confirmation / model confidence)
-  if (stackScore >= 0.65)      _add(_rw('vol_surge'), 'ML stack >65%');
-  else if (stackScore >= 0.50) _add(_rw('vol_mid'),   'ML stack >50%');
-
-  // XGB pred
-  if (bestPred > 1.5)      { conf += 12; why.push('XGB >1.5% (+12)'); }
-  else if (bestPred > 0.5) { conf +=  6; why.push('XGB >0.5% (+6)'); }
-  else if (bestPred > 0)   { conf +=  2; why.push('XGB >0% (+2)'); }
-
-  const isR3setup = (stock.matchedRules||[]).some(r=>['rule3','rule4','rule5'].includes(r));
-  let entry = price, sl, t1, t2, t3;
-
-  if (direction === 'LONG') {
-    sl = isR3setup ? tc - atr_proxy*0.2 : bc - atr_proxy*0.3;
-    t1 = r3; t2 = r3 + spread*0.18; t3 = r3 + spread*0.36;
+  if (px) {
+    entry = px.entry;
+    sl    = px.stop;
+    t1    = px.t1;
+    t2    = px.t2;
+    t3    = px.t3;
+    why.push(`Exits from rule ${stock.primaryRule} (ML-adaptive, scale ×${px.targetScale})`);
   } else {
-    sl = isR3setup ? bc + atr_proxy*0.2 : tc + atr_proxy*0.3;
-    t1 = s3; t2 = s3 - spread*0.18; t3 = s3 - spread*0.36;
+    // Fallback: CPR/Cam geometry (no server exit data)
+    entry = price;
+    const isR3setup = (stock.matchedRules||[]).some(r=>['rule3','rule4','rule5'].includes(r));
+    if (direction === 'LONG') {
+      sl = isR3setup ? tc - atr_proxy*0.2 : bc - atr_proxy*0.3;
+      t1 = r3; t2 = r3 + spread*0.18; t3 = r3 + spread*0.36;
+    } else {
+      sl = isR3setup ? bc + atr_proxy*0.2 : tc + atr_proxy*0.3;
+      t1 = s3; t2 = s3 - spread*0.18; t3 = s3 - spread*0.36;
+    }
+    why.push('Exits: CPR/Cam geometry (no server ML exits)');
   }
 
-  const reward = Math.abs(t1 - entry);
-  const risk   = Math.abs(sl  - entry);
+  const reward = Math.abs((t1||entry) - entry);
+  const risk   = Math.abs((sl||entry) - entry);
   const rr     = risk > 0 ? reward / risk : 0;
 
+  // ── Tier: lgbm2c confidence × regime multiplier; Priority 5: confluencePass gates STRONG BUY ──
+  const adjConf = conf * regimeMult;
   let tier;
-  if (rr >= 2.5 && conf >= 70 && regimeAligned) tier = 'STRONG BUY';
-  else if (rr >= 2.0 && conf >= 55)             tier = 'BUY';
-  else if (rr >= 1.5 && conf >= 40)             tier = 'SPECULATIVE';
-  else                                           tier = 'AVOID';
+  if      (adjConf >= 62 && rr >= 2.0 && stock.confluencePass && regimeAllowed) tier = 'STRONG BUY';
+  else if (adjConf >= 50 && rr >= 1.5 && regimeAllowed)                         tier = 'BUY';
+  else if (adjConf >= 38 && rr >= 1.2)                                           tier = 'SPECULATIVE';
+  else                                                                           tier = 'AVOID';
 
-  return { tier, direction, confidence:conf, rr, entry, sl, t1, t2, t3, atr:atr_proxy, why };
+  // ── Priority 3c: position size label ─────────────────────────────────────
+  const positionLabel = ml.positionLabel || (ml.positionSize != null
+    ? ['Skip','Quarter','Half','Three-Quarter','Full'][Math.min(Math.round(ml.positionSize*4),4)]
+    : 'Half');
+
+  return { tier, direction, confidence: Math.round(adjConf), rr, entry, sl, t1, t2, t3,
+           atr: atr_proxy, why, positionLabel, regimeMult };
 }
 
 function recBadgeHtml(rec) {
   const cls   = rec.tier.replace(' ','-');
   const label = rec.tier==='SPECULATIVE' ? 'SPEC' : rec.tier==='STRONG BUY' ? 'STR BUY' : rec.tier;
   const dir   = rec.direction==='LONG' ? '▲' : rec.direction==='SHORT' ? '▼' : '─';
-  const confStr = rec.tier==='NEUTRAL' ? '' : `<span class="rec-conf">${rec.confidence>0?'+':''}${rec.confidence}</span>`;
-  return `<span class="rec-badge rec-${cls}" title="R:R ${rec.rr.toFixed(2)} | Conf ${rec.confidence}">${dir} ${label}${confStr}</span>`;
+  const confStr = rec.tier==='NEUTRAL' ? '' : `<span class="rec-conf">${rec.confidence}</span>`;
+  const posStr  = rec.positionLabel && rec.tier!=='NEUTRAL' && rec.tier!=='AVOID'
+    ? ` <span class="rec-pos" title="PPO position size">${rec.positionLabel}</span>` : '';
+  return `<span class="rec-badge rec-${cls}" title="R:R ${rec.rr.toFixed(2)} | Conf ${rec.confidence} | Regime ×${(rec.regimeMult||1).toFixed(1)}">${dir} ${label}${confStr}${posStr}</span>`;
 }
 
 function recDetailHtml(rec, stock) {
@@ -1770,8 +1725,12 @@ function recDetailHtml(rec, stock) {
       <span class="rec-detail-value" style="color:${t1Col}">₹${fmt(rec.t3)}</span>
     </div>
     <div class="rec-detail-group">
-      <span class="rec-detail-label">R:R &nbsp;|&nbsp; Confidence</span>
-      <span class="rec-detail-value ${rrCls}">${rec.rr.toFixed(2)} : 1 &nbsp;|&nbsp; ${rec.confidence > 0 ? '+' : ''}${rec.confidence} pts</span>
+      <span class="rec-detail-label">R:R &nbsp;|&nbsp; ML Confidence</span>
+      <span class="rec-detail-value ${rrCls}">${rec.rr.toFixed(2)} : 1 &nbsp;|&nbsp; ${rec.confidence} (regime ×${(rec.regimeMult||1).toFixed(1)})</span>
+    </div>
+    <div class="rec-detail-group">
+      <span class="rec-detail-label">Position Size</span>
+      <span class="rec-detail-value">${rec.positionLabel || '—'}</span>
     </div>
     <div class="rec-detail-group" style="grid-column:1/-1">
       <span class="rec-detail-label">Signal factors</span>

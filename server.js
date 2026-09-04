@@ -539,6 +539,14 @@ const CONFLUENCE_THRESHOLD = 4.5;  // raised 3.5→4.5: only high-quality rule c
 const BREAKOUT_RULES       = new Set(['rule3', 'rule8']);
 const MEAN_REVERSION_RULES = new Set(['rule9', 'rule10']);  // skip directional gates
 
+// Regime-adaptive gate thresholds (Priority 6)
+const REGIME_GATES = {
+  'Bull-Trend':     { adx: 22, atrPct: [0.35, 0.75], volRatio: 0.85, vix: 28 },
+  'Bear-Trend':     { adx: 25, atrPct: [0.45, 0.80], volRatio: 1.00, vix: 22 },
+  'Chop':           { adx: 28, atrPct: [0.55, 0.85], volRatio: 1.15, vix: 20 },
+  'High-Vol-Panic': { adx: 30, atrPct: [0.70, 1.20], volRatio: 1.40, vix: 16 },
+};
+
 // Per-rule optimal exit params from MFE/MAE 85th/60th pct backtest
 const MFE_MAE_PARAMS = {
   rule1:  { optTargetPct: 2.687, optStopPct: 4.037 },
@@ -1098,10 +1106,13 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     // Direction-agnostic gates
     const dg = new Set(opts.disabledGates || []);
 
-    const gateADX    = dg.has('adx')      ? true : adxVal   >= 25;           // raised 20→25: require confirmed trend
-    const gateATRPct = dg.has('atrPct')   ? true : (atrPctVal >= 0.40 && atrPctVal <= 0.70);  // tightened: prime vol zone
-    const gateVol    = dg.has('volSurge') ? true : volRatio >= 1.0;
-    const gateVIX    = dg.has('vix')      ? true : vixPass;
+    // Regime-adaptive gate thresholds (Priority 6)
+    const currentRegimeForGates = mlEngine.getCurrentRegime();
+    const gThr     = REGIME_GATES[currentRegimeForGates] || REGIME_GATES['Bull-Trend'];
+    const gateADX    = dg.has('adx')      ? true : adxVal >= gThr.adx;
+    const gateATRPct = dg.has('atrPct')   ? true : (atrPctVal >= gThr.atrPct[0] && atrPctVal <= gThr.atrPct[1]);
+    const gateVol    = dg.has('volSurge') ? true : volRatio >= gThr.volRatio;
+    const gateVIX    = dg.has('vix')      ? true : (vixVal === 0 || vixVal < gThr.vix);
 
     // Directional indicators (computed once, applied per rule)
     const ema200val = hCloses.length >= 20 ? calcEMA(hCloses, Math.min(200, hCloses.length)) : last.close;
@@ -1211,34 +1222,24 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
 
       if (allPass) {
         qualityPassedRules.push(rid);
-
-        // ⑤ Optimal exit levels from MFE/MAE backtest
+        // Store base MFE/MAE params + direction; ML scaling applied after mlResult is ready
         const ep = MFE_MAE_PARAMS[rid] || { optTargetPct: 2.5, optStopPct: 3.5 };
-        const entry = last.close;
         exitLevelsByRule[rid] = {
           direction,
-          entry:      +entry.toFixed(2),
-          t1CutPrice: +(entry * (1 - 0.012)).toFixed(2),        // -1.2% day-1 cut
-          trailStop:  +(entry * (1 - 0.008)).toFixed(2),        // -0.8% trailing stop
-          optTarget:  +(entry * (1 + ep.optTargetPct/100) * (direction === 1 ? 1 : -1) +
-                        entry * (direction === -1 ? 2 : 0)).toFixed(2),
-          targetPct:  ep.optTargetPct,
-          stopPct:    ep.optStopPct,
-          targetPrice: direction === 1
-            ? +(entry * (1 + ep.optTargetPct / 100)).toFixed(2)
-            : +(entry * (1 - ep.optTargetPct / 100)).toFixed(2),
-          stopPrice: direction === 1
-            ? +(entry * (1 - ep.optStopPct  / 100)).toFixed(2)
-            : +(entry * (1 + ep.optStopPct  / 100)).toFixed(2)
+          entry:      +last.close.toFixed(2),
+          _baseTarget: ep.optTargetPct,
+          _baseStop:   ep.optStopPct,
+          t1CutPrice:  +(last.close * (direction === 1 ? 1 - 0.012 : 1 + 0.012)).toFixed(2),
+          trailStop:   +(last.close * (direction === 1 ? 1 - 0.008 : 1 + 0.008)).toFixed(2),
         };
       }
     }
 
-    // Confluence score (only quality-passed rules) + CPR width quality adjustment
+    // Confluence + exit levels computed after mlResult (see post-mlResult block below)
     const cprWidthPct   = cpr.pivot > 0 ? Math.abs(cpr.tc - cpr.bc) / cpr.pivot * 100 : 0.5;
-    const cprWidthBonus = cprWidthPct < 0.3 ? 0.5 : cprWidthPct > 1.0 ? -0.5 : 0;  // narrow=bonus, wide=penalty
-    const confluenceScore = qualityPassedRules.reduce((s, r) => s + (RULE_SHARPE[r] || 0), 0) + cprWidthBonus;
-    const confluencePass  = confluenceScore >= CONFLUENCE_THRESHOLD;
+    const rawSharpeSum  = qualityPassedRules.reduce((s, r) => s + (RULE_SHARPE[r] || 0), 0);
+    let confluenceScore = 0;
+    let confluencePass  = false;
 
     // ── XGBoost predictions ────────────────────────────────────────────────────
     let predReturnByRule = {};
@@ -1605,6 +1606,58 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5 };
     }
 
+    // ── Post-mlResult: confluence + ML-adaptive exit levels + best-rule (P1,P2,P3,P4) ──────
+    {
+      const mlConf       = mlResult.stackScore != null ? mlResult.stackScore : 0.5;
+      const ciWidth      = (mlResult.confUpper != null && mlResult.confLower != null)
+        ? Math.max(0.05, mlResult.confUpper - mlResult.confLower) : 0.20;
+      const stopScale    = Math.max(0.75, Math.min(1.40, 1.0 + (ciWidth - 0.15) * 2.0));
+      const targetScale  = mlConf > 0.5 ? 1.0 + (mlConf - 0.5) * 1.2 : 0.85 + mlConf * 0.30;
+
+      // Priority 3: apply ML scaling to base exit params → T1/T2/T3
+      for (const rid of qualityPassedRules) {
+        const ex  = exitLevelsByRule[rid];
+        const dir = ex.direction;
+        const ent = ex.entry;
+        const adjT = ex._baseTarget * targetScale;
+        const adjS = ex._baseStop   * stopScale;
+        ex.t1 = dir === 1 ? +(ent * (1 + adjT * 0.50 / 100)).toFixed(2)
+                           : +(ent * (1 - adjT * 0.50 / 100)).toFixed(2);
+        ex.t2 = dir === 1 ? +(ent * (1 + adjT        / 100)).toFixed(2)
+                           : +(ent * (1 - adjT        / 100)).toFixed(2);
+        ex.t3 = dir === 1 ? +(ent * (1 + adjT * 1.60 / 100)).toFixed(2)
+                           : +(ent * (1 - adjT * 1.60 / 100)).toFixed(2);
+        ex.stop        = dir === 1 ? +(ent * (1 - adjS / 100)).toFixed(2)
+                                   : +(ent * (1 + adjS / 100)).toFixed(2);
+        ex.targetPct   = +adjT.toFixed(3);
+        ex.stopPct     = +adjS.toFixed(3);
+        ex.stopScale   = +stopScale.toFixed(3);
+        ex.targetScale = +targetScale.toFixed(3);
+        delete ex._baseTarget; delete ex._baseStop;
+      }
+
+      // Priority 1 + 2: confluence = (Sharpe-sum + CPR bonus + ML bonus) × regime multiplier
+      const cprWidthBonus = cprWidthPct < 0.3 ? 0.5 : cprWidthPct > 1.0 ? -0.5 : 0;
+      const mlScoreBonus  = (mlConf - 0.5) * 6.0;
+      const _regimeMult   = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.7, 'Chop': 0.4, 'High-Vol-Panic': 0.0 };
+      const regimeMult    = _regimeMult[currentRegimeForGates] ?? 0.6;
+      confluenceScore     = (rawSharpeSum + cprWidthBonus + mlScoreBonus) * regimeMult;
+      confluencePass      = confluenceScore >= CONFLUENCE_THRESHOLD;
+    }
+
+    // Priority 4: best rule = highest XGB predicted return among quality-passed rules
+    const primaryRule = qualityPassedRules.length > 0
+      ? qualityPassedRules.reduce((best, rid) =>
+          (predReturnByRule[rid] ?? -99) > (predReturnByRule[best] ?? -99) ? rid : best
+        , qualityPassedRules[0])
+      : null;
+    const primaryExit = primaryRule ? exitLevelsByRule[primaryRule] : null;
+
+    // Priority 3c: PPO positionSize → human-readable size label
+    const posLabel = ['Skip','Quarter','Half','Three-Quarter','Full'];
+    const posIdx   = mlResult.positionSize != null ? Math.round(mlResult.positionSize * 4) : 2;
+    mlResult.positionLabel = posLabel[Math.min(posIdx, 4)];
+
     const p = v => +v.toFixed(2);
     const pPos = last.close > cpr.upper ? 'above' : last.close < cpr.lower ? 'below' : 'inside';
 
@@ -1643,6 +1696,8 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       },
       // Optimal exit levels per quality-passed rule
       exitLevelsByRule,
+      primaryRule,
+      primaryExit,
       // XGB predictions
       predReturnByRule,
       bestPred: Object.values(predReturnByRule).length
