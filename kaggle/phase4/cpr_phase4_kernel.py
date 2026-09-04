@@ -84,10 +84,9 @@ class SignalSizingEnv(gym.Env):
     Gym environment for signal position sizing.
     State  : 56 signal features + [lgbm2c_score, exposure, running_sharpe, win_streak]
     Action : Discrete(5) → [0%, 25%, 50%, 75%, 100%]
-    Reward : delta-Sharpe (change in rolling Sharpe) — directly optimizes what matters
+    Reward : P&L reward (trade_return - transaction_cost) — direct, low-variance signal
     """
     ACTION_SIZES  = np.array([0.0, 0.25, 0.50, 0.75, 1.00])
-    SHARPE_WINDOW = 50   # rolling window for reward computation
 
     def __init__(self, signals_df, mode='train'):
         super().__init__()
@@ -99,19 +98,13 @@ class SignalSizingEnv(gym.Env):
         self.action_space = spaces.Discrete(5)
         self.reset()
 
-    def _rolling_sharpe(self):
-        if len(self.returns) < 10:
-            return 0.0
-        r = np.array(self.returns[-self.SHARPE_WINDOW:])
-        return float((r.mean() / (r.std() + 1e-8)) * np.sqrt(252))
-
     def _get_obs(self):
         row  = self.df.iloc[self.idx]
         base = np.array([float(row.get(f, 0)) for f in FEATURE_COLS], dtype=np.float32)
         extra = np.array([
             float(row.get('lgbm2c_score', 0.5)),   # ML confidence — primary signal quality
             self.exposure,
-            np.clip(self.running_sharpe, -3, 3),
+            self.cum_pnl,
             float(self.win_streak),
         ], dtype=np.float32)
         obs = np.concatenate([base, extra])
@@ -119,12 +112,11 @@ class SignalSizingEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.idx            = np.random.randint(0, max(1, self.n - 1)) if self.mode == 'train' else 0
-        self.exposure       = 0.0
-        self.prev_action    = 0
-        self.returns        = []
-        self.running_sharpe = 0.0
-        self.win_streak     = 0
+        self.idx        = np.random.randint(0, max(1, self.n - 1)) if self.mode == 'train' else 0
+        self.exposure   = 0.0
+        self.prev_action = 0
+        self.cum_pnl    = 0.0
+        self.win_streak = 0
         return self._get_obs(), {}
 
     def step(self, action):
@@ -133,19 +125,12 @@ class SignalSizingEnv(gym.Env):
         actual_ret = float(row.get('actual_return', 0.0))
 
         trade_return = actual_ret * size_frac
-
-        # Sharpe-delta reward: directly maximise rolling Sharpe improvement
-        prev_sharpe = self.running_sharpe
-        self.returns.append(trade_return)
-        new_sharpe  = self._rolling_sharpe()
-        self.running_sharpe = new_sharpe
-
-        sharpe_delta = new_sharpe - prev_sharpe
         trans_cost   = 0.001 * abs(action - self.prev_action)
-        reward       = sharpe_delta - trans_cost
+        reward       = trade_return - trans_cost
 
-        self.win_streak  = (self.win_streak + 1) if trade_return > 0 and size_frac > 0 else 0
-        self.exposure    = size_frac
+        self.cum_pnl    = np.clip(self.cum_pnl + trade_return, -5, 5)
+        self.win_streak = (self.win_streak + 1) if trade_return > 0 and size_frac > 0 else 0
+        self.exposure   = size_frac
         self.prev_action = action
         self.idx         = (self.idx + 1) % self.n
         done = (self.idx == 0)

@@ -1,6 +1,6 @@
 {
   "name": "nse-smart-screener",
-  "version": "1.0.0",
+  "version": "2.4.1",
   "description": "NSE India Stock Screener — CPR, Camarilla Pivots, VWAP",
   "main": "server.js",
   "scripts": {
