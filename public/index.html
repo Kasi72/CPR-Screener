@@ -2585,15 +2585,44 @@ const App = {
 
   exportCSV() {
     if (!State.results.length) { toast('No data to export'); return; }
-    const headers = ['Symbol','Price','Change%','TC','Pivot','BC','WidthPct','CamR3','CamS3','VWAP','Position','MatchedRules','MatchCount'];
-    const rows = State.results.map(s => [
-      s.symbol, s.price, s.change,
-      s.cpr.tc, s.cpr.pivot, s.cpr.bc, s.cpr.widthPct,
-      s.camarilla.r3, s.camarilla.s3, s.vwap,
-      s.pricePosition, s.matchedRules.join('|'), s.matchCount
-    ]);
+    const esc = v => (v == null ? '' : String(v).includes(',') ? `"${String(v).replace(/"/g,'""')}"` : String(v));
+    const headers = [
+      'Symbol','Price','Change%',
+      'Verdict','Direction','Confidence','R:R',
+      'Entry','StopLoss','T1','T2','T3',
+      'PositionSize','Regime','RegimeMult',
+      'ConfluenceScore','ConfluencePass',
+      'QualityRules','PrimaryRule','BestXGB%',
+      'LGBM2cScore',
+      'ADX','ATR%','VolRatio','VIX',
+      'TC','Pivot','BC','WidthPct',
+      'CamR3','CamS3','VWAP','Position',
+      'MatchedRules','MatchCount'
+    ];
+    const rows = State.results.map(s => {
+      const rec = computeRec(s);
+      const ml  = s.ml || {};
+      const gg  = s.globalGates || {};
+      return [
+        s.symbol, s.price, s.change,
+        rec.tier, rec.direction, rec.confidence, rec.rr != null ? rec.rr.toFixed(2) : '',
+        rec.entry, rec.sl, rec.t1, rec.t2, rec.t3,
+        rec.positionLabel, ml.regime || '', rec.regimeMult != null ? rec.regimeMult.toFixed(1) : '',
+        s.confluenceScore, s.confluencePass ? 1 : 0,
+        (s.qualityPassedRules || []).join('|'), s.primaryRule || '',
+        s.bestPred != null ? (s.bestPred * 100).toFixed(2) : '',
+        ml.stackScore != null ? (ml.stackScore * 100).toFixed(1) : '',
+        gg.adx     ? gg.adx.value     : '',
+        gg.atrPct  ? gg.atrPct.value  : '',
+        gg.volSurge? gg.volSurge.value: '',
+        gg.vix     ? gg.vix.value     : '',
+        s.cpr.tc, s.cpr.pivot, s.cpr.bc, s.cpr.widthPct,
+        s.camarilla.r3, s.camarilla.s3, s.vwap, s.pricePosition,
+        s.matchedRules.join('|'), s.matchCount
+      ].map(esc);
+    });
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `nse_screen_${State.timeframe}_${new Date().toISOString().slice(0,10)}.csv`;
