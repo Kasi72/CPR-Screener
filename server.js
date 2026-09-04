@@ -1152,6 +1152,57 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       const xMom5     = hCloses.length >= 6
                           ? (hCloses[hCloses.length-1] - hCloses[hCloses.length-6]) / hCloses[hCloses.length-6]
                           : 0;
+      const xMom3  = hCloses.length >= 4
+                       ? (hCloses[hCloses.length-1] - hCloses[hCloses.length-4]) / hCloses[hCloses.length-4]
+                       : 0;
+      const xMom10 = hCloses.length >= 11
+                       ? (hCloses[hCloses.length-1] - hCloses[hCloses.length-11]) / hCloses[hCloses.length-11]
+                       : 0;
+      const xMom20 = hCloses.length >= 21
+                       ? (hCloses[hCloses.length-1] - hCloses[hCloses.length-21]) / hCloses[hCloses.length-21]
+                       : 0;
+
+      const gap_pct = prevClose > 0 ? (last.open - prevClose) / prevClose : 0;
+
+      // atr_expansion: today ATR vs 10-day avg ATR
+      const _atrToday = hHighs.length > 0 ? hHighs[hHighs.length-1] - hLows[hLows.length-1] : 0;
+      let _atr10avg = _atrToday;
+      if (hHighs.length >= 10) {
+        const _atrs = hHighs.slice(-10).map((h, i) => h - hLows[hLows.length - 10 + i]);
+        _atr10avg = _atrs.reduce((a, b) => a + b, 0) / 10;
+      }
+      const atr_expansion = _atr10avg > 0 ? _atrToday / _atr10avg : 1;
+
+      // vol_trend_slope: normalized OLS slope over last 20 volumes
+      let vol_trend_slope = 0;
+      if (hVols.length >= 5) {
+        const vSlice = hVols.slice(-Math.min(20, hVols.length));
+        const n = vSlice.length;
+        const sumX = n * (n - 1) / 2, sumX2 = n * (n - 1) * (2 * n - 1) / 6;
+        const sumY = vSlice.reduce((a, b) => a + b, 0);
+        const sumXY = vSlice.reduce((s, v, i) => s + i * v, 0);
+        const denom = n * sumX2 - sumX * sumX;
+        vol_trend_slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom / (xVol20a || 1) : 0;
+      }
+
+      // days_since_52hi: bars-ago index of 52w high, normalized to trading-year
+      const _hiMax = hHighs.length > 0 ? Math.max(...hHighs) : last.close;
+      const _hi52idx = hHighs.lastIndexOf(_hiMax);
+      const days_since_52hi = hHighs.length > 0 ? (hHighs.length - 1 - _hi52idx) / 252 : 0;
+
+      // expiry_dist: fraction of 30-day window remaining to last Thursday of current month
+      const _now = new Date();
+      const _lastThurs = (() => {
+        const d = new Date(_now.getFullYear(), _now.getMonth() + 1, 0);
+        d.setDate(d.getDate() - ((d.getDay() + 3) % 7));
+        return d;
+      })();
+      const expiry_dist = Math.max(0, (_lastThurs - _now) / 86400000) / 30;
+
+      // hmm_regime as ordinal int (Bull=3, Chop=2, Bear=1, Panic=0)
+      const _regimeInt = { 'Bull-Trend': 3, 'Bear-Trend': 1, 'Chop': 2, 'High-Vol-Panic': 0 };
+      const _curRegime = mlEngine.getCurrentRegime();
+      const hmm_regime_feat = _regimeInt[_curRegime] ?? 2;
 
       featureList = rulesToPredict.map(rid => {
         const direction  = getRuleDirection(rid, cpr, cam, last.close, prevClose, periodHigh, periodLow);
@@ -1184,6 +1235,19 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           conf_vol,
           rsi_dir,
           hi52_dir,
+          // Sprint 3 + momentum features (closes inference-training gap)
+          cpr_pos:        (cpr.tc - cpr.bc) > 0 ? (last.close - cpr.bc) / (cpr.tc - cpr.bc) : 0.5,
+          dist_r1:        last.close > 0 ? (last.close - cam.r1) / last.close : 0,
+          dist_s1:        last.close > 0 ? (last.close - cam.s1) / last.close : 0,
+          mom3:           xMom3,
+          mom10:          xMom10,
+          mom20:          xMom20,
+          gap_pct,
+          atr_expansion,
+          vol_trend_slope,
+          days_since_52hi,
+          expiry_dist,
+          hmm_regime:     hmm_regime_feat,
         };
       });
 
