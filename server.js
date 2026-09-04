@@ -1326,6 +1326,46 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         vol_accel_delta = vol_accel - (vol20p > 0 ? vol3p / vol20p : 1);
       }
 
+      // ── Market RS vs Nifty (niftyBarsCache already loaded globally) ───────────
+      let market_rs_5d = 0, market_rs_20d = 0;
+      if (niftyBarsCache.length >= 25 && hCloses.length >= 25) {
+        const nc  = niftyBarsCache[niftyBarsCache.length - 1].close;
+        const n5  = niftyBarsCache[niftyBarsCache.length - 6].close;
+        const n20 = niftyBarsCache[niftyBarsCache.length - 21].close;
+        const sc  = hCloses[hCloses.length - 1];
+        const s5  = hCloses[hCloses.length - 6];
+        const s20 = hCloses[hCloses.length - 21];
+        if (n5  > 0 && s5  > 0) market_rs_5d  = (sc / s5)  - (nc / n5);
+        if (n20 > 0 && s20 > 0) market_rs_20d = (sc / s20) - (nc / n20);
+      }
+
+      // cpr_test_count_5d: days in last 5 where daily H/L range touched today's CPR zone
+      let cpr_test_count_5d = 0;
+      {
+        const lb = Math.min(5, histBars.length);
+        for (let i = histBars.length - lb; i < histBars.length; i++) {
+          const b = histBars[i];
+          if (b.low <= cpr.upper && b.high >= cpr.lower) cpr_test_count_5d++;
+        }
+      }
+
+      // cpr_virgin: today's bar has not traded inside CPR zone (EOD approximation)
+      const cpr_virgin = (last.low > cpr.upper || last.high < cpr.lower) ? 1 : 0;
+
+      // cpr_zone_vol_ratio: fraction of last-5-day volume in CPR-touching bars
+      let cpr_zone_vol_ratio = 0;
+      {
+        const lb = Math.min(5, histBars.length);
+        let totalVol = 0, cprVol = 0;
+        for (let i = histBars.length - lb; i < histBars.length; i++) {
+          const b = histBars[i];
+          const v = b.volume || 0;
+          totalVol += v;
+          if (b.low <= cpr.upper && b.high >= cpr.lower) cprVol += v;
+        }
+        cpr_zone_vol_ratio = totalVol > 0 ? cprVol / totalVol : 0;
+      }
+
       featureList = rulesToPredict.map(rid => {
         const direction  = getRuleDirection(rid, cpr, cam, last.close, prevClose, periodHigh, periodLow);
         const ruleNum    = parseInt(rid.replace('rule', ''));
@@ -1374,8 +1414,10 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           cpr_overlap_pct,
           open_to_cpr_dist,
           prev_cpr_respected,
+          cpr_zone_vol_ratio,
           // Sprint 2A CPR depth features
           open_inside_cpr,
+          cpr_virgin,
           consecutive_narrow_cprs,
           cpr_midpoint_trend,
           cpr_expansion_factor,
@@ -1390,6 +1432,11 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           rsi_div,
           vol_accel_delta,
           prev_bar_close_pos,
+          // Market relative strength (EOD — niftyBarsCache loaded at startup)
+          market_rs_5d,
+          market_rs_20d,
+          // Sprint 3 CPR test count
+          cpr_test_count_5d,
         };
       });
 
