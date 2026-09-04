@@ -1502,7 +1502,6 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           dist_hi52,
           dist_lo52,
           vol_accel,
-          // Phase D: VIX (market_rs_*, sector_rs_*, deliv_pct, pcr not available real-time)
           india_vix:     vixVal,
           // Tier-1 interaction features
           conf_vol,
@@ -1510,8 +1509,8 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           hi52_dir,
           // Sprint 3 + momentum features
           cpr_pos:        (cpr.tc - cpr.bc) > 0 ? (last.close - cpr.bc) / (cpr.tc - cpr.bc) : 0.5,
-          dist_r1:        last.close > 0 ? (last.close - cam.r1) / last.close : 0,
-          dist_s1:        last.close > 0 ? (last.close - cam.s1) / last.close : 0,
+          dist_r1:        last.close > 0 ? Math.max(-0.15, Math.min(0.15, (last.close - (2 * cpr.pivot - prevPeriod.low))  / last.close)) : 0,
+          dist_s1:        last.close > 0 ? Math.max(-0.15, Math.min(0.15, (last.close - (2 * cpr.pivot - prevPeriod.high)) / last.close)) : 0,
           mom3:           xMom3,
           mom10:          xMom10,
           mom20:          xMom20,

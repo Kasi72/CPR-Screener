@@ -560,7 +560,10 @@ def regime():
 def position_size():
     try:
         data   = request.json
-        X      = extract_features(data if isinstance(data, list) else [data])
+        # PPO was trained on 60-dim state: FEATURE_COLS(56) + [lgbm2c_score, exposure, cum_pnl, win_streak]
+        # Use extract_features_2c to get correct 56-feature order, strip the 7 interaction cols
+        X_2c   = extract_features_2c(data if isinstance(data, list) else [data])
+        X      = X_2c[:, :len(_P2C_BASE_FEATURES)]   # 56 base features only
         regime = request.args.get('regime', 'Bull-Trend')
         regime_score = {'Bull-Trend': 1.0, 'Bear-Trend': 0.4,
                         'Chop': 0.2, 'High-Vol-Panic': 0.0}.get(regime, 0.6)
