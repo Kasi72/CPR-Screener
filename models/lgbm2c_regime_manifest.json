@@ -1,0 +1,8 @@
+{
+  "regime_model_files": {
+    "0": "D:\\Claude code\\nse-screener\\models\\lgbm2c_regime_0_js.json",
+    "1": "D:\\Claude code\\nse-screener\\models\\lgbm2c_regime_1_js.json",
+    "2": "D:\\Claude code\\nse-screener\\models\\lgbm2c_regime_2_js.json",
+    "3": "D:\\Claude code\\nse-screener\\models\\lgbm2c_regime_3_js.json"
+  }
+}

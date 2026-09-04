@@ -1,34 +1,109 @@
 'use strict';
 /**
- * ml_engine.js — JavaScript ML inference layer
+ * ml_engine.js — JavaScript ML inference layer (pure-JS, no Python subprocess)
  *
  * Responsibilities:
- *   1. HMM Viterbi decoder (from hmm_params.json) — runs locally, no Python needed
+ *   1. HMM Viterbi decoder (from hmm_params.json)
  *   2. Conformal prediction interval (from conformal_scores.json)
- *   3. Ensemble score via predict_server /predict_ensemble
- *   4. Position size via predict_server /position_size (with PPO weights)
+ *   3. LGBM2c ensemble score — pure JS, from lgbm2c_global_js.json + lgbm2c_regime_N_js.json
+ *   4. PPO position size — pure JS, from ppo_policy_weights.json
  *   5. SHAP gate weight loader (from shap_gate_weights.json)
- *
- * All JSON model files are read from ./models/
- * predict_server must be running on port 5001 for ensemble/position endpoints.
  */
 
 const fs   = require('fs');
 const path = require('path');
-const http = require('http');
+const { loadModel, predictOne } = require('./lib/lgbmInfer');
+const { ppoPredict }             = require('./lib/ppoInfer');
 
-const MODELS_DIR     = path.join(__dirname, 'models');
-const PREDICT_PORT   = 5001;
-const PREDICT_HOST   = '127.0.0.1';
+const MODELS_DIR        = path.join(__dirname, 'models');
+const LGBM_GLOBAL_PATH  = path.join(MODELS_DIR, 'lgbm2c_global_js.json');
+const LGBM_REGIME_PATHS = [0, 1, 2, 3].map(i => path.join(MODELS_DIR, `lgbm2c_regime_${i}_js.json`));
+const PPO_WEIGHTS_PATH  = path.join(MODELS_DIR, 'ppo_policy_weights.json');
+
+// ─── Feature schema (must match _P2C_ALL_FEATURES in predict_server.py) ──────
+const _P2C_BASE_FEATURES = [
+  'cpr_width_pct', 'vwap_dist',    'atr_pct_rank',  'vol_rank',
+  'n_rules_fired', 'sg_vel',       'ema200_dist',    'rsi14',
+  'mom5',          'dow',          'rule_id',         'direction',
+  'dist_hi52',     'dist_lo52',    'vol_accel',
+  'market_rs_5d',  'market_rs_20d','sector_rs_5d',   'sector_rs_20d',
+  'deliv_pct',     'pcr',          'india_vix',
+  'conf_vol',      'rsi_dir',      'hi52_dir',
+  'cpr_compress',  'cpr_pos',      'dist_r1',         'dist_s1',
+  'mom3',          'mom10',        'mom20',
+  'rsi_div',       'vol_accel_delta',
+  'days_since_52hi','expiry_dist',
+  'cpr_overlap_pct','open_to_cpr_dist','prev_cpr_respected','cpr_zone_vol_ratio',
+  'hmm_regime',
+  'open_inside_cpr','cpr_virgin','consecutive_narrow_cprs',
+  'cpr_midpoint_trend','cpr_expansion_factor',
+  'cpr_above_prev_cpr','prev_close_inside_cpr','atr_to_cpr_ratio',
+  'cpr_width_percentile_252d','prev_day_ochoa_type',
+  'gap_pct','cpr_test_count_5d','prev_bar_close_pos',
+  'atr_expansion','vol_trend_slope',
+];  // 56
+
+// Features whose sign gets flipped for SELL direction (matches predict_server.py)
+const _P2C_DIRECTIONAL = new Set([
+  'dist_hi52','dist_lo52','vwap_dist','ema200_dist',
+  'mom3','mom5','mom10','mom20',
+  'market_rs_5d','market_rs_20d','sector_rs_5d','sector_rs_20d',
+  'cpr_pos','dist_r1','dist_s1','sg_vel',
+  'open_to_cpr_dist','gap_pct',
+]);
+
+// Defaults for features that may be absent (matches _P2C_DEFAULTS in predict_server.py)
+const _P2C_DEFAULTS = {
+  cpr_overlap_pct: 0.5, open_to_cpr_dist: 0.0, prev_cpr_respected: 0.0,
+  cpr_zone_vol_ratio: 1.0, hmm_regime: -1, open_inside_cpr: 0.0,
+  cpr_virgin: 0.0, consecutive_narrow_cprs: 0.0, cpr_midpoint_trend: 0.0,
+  cpr_expansion_factor: 1.0, cpr_above_prev_cpr: 0.0, prev_close_inside_cpr: 0.0,
+  atr_to_cpr_ratio: 1.0, cpr_width_percentile_252d: 0.5, prev_day_ochoa_type: 0.0,
+  gap_pct: 0.0, cpr_test_count_5d: 0.0, prev_bar_close_pos: 0.5,
+  atr_expansion: 1.0, vol_trend_slope: 0.0, deliv_pct: 0.0, pcr: 1.0,
+};
+
+/**
+ * Build 63-element feature vector from a features object.
+ * Applies directional flip on _P2C_DIRECTIONAL features, then appends 7
+ * interaction features — exactly matching extract_features_2c() in predict_server.py.
+ */
+function buildFeatureVector(f) {
+  const dir = f.direction ?? 1;
+
+  // Resolve a single feature: apply default then directional flip
+  function get(name) {
+    const raw = (f[name] !== undefined && f[name] !== null) ? f[name]
+              : (_P2C_DEFAULTS[name] !== undefined ? _P2C_DEFAULTS[name] : 0);
+    return _P2C_DIRECTIONAL.has(name) ? raw * dir : raw;
+  }
+
+  const vec = new Float32Array(63);
+
+  // Base 56 features
+  for (let i = 0; i < 56; i++) vec[i] = get(_P2C_BASE_FEATURES[i]);
+
+  // Interaction features (indices 56-62)
+  // NOTE: Python computes interactions AFTER flipping base features in-place,
+  // so get() already returns flipped values — the formulas below match Python.
+  vec[56] = get('cpr_compress')   * get('vol_rank');                           // cpr_vol_interaction
+  vec[57] = get('hmm_regime')     * get('mom5');                               // regime_momentum
+  vec[58] = (1.0 - get('cpr_width_pct')) * get('rsi14');                      // cpr_rsi_squeeze
+  vec[59] = get('cpr_overlap_pct') * get('cpr_zone_vol_ratio');                // overlap_vol_signal
+  vec[60] = (get('market_rs_5d') + get('sector_rs_5d')) * dir;                // rs_direction_alignment
+  vec[61] = get('cpr_virgin')     * get('mom5');                               // virgin_momentum
+  vec[62] = get('consecutive_narrow_cprs') * get('vol_rank');                  // narrow_breakout_vol
+
+  return vec;
+}
 
 // ─── State cache ──────────────────────────────────────────────────────────────
-let _hmmParams       = null;
-let _conformalScores = null;
-let _gateWeights     = null;
-let _currentRegime   = null;   // cached from last computeRegime call
-let _serverAvailable = null;   // null = unknown, true/false after first probe
-let _serverProbeTime = 0;      // ms timestamp of last probe
-const _PROBE_TTL_MS  = 60_000; // re-probe after 60 s so server restarts are detected
+let _hmmParams          = null;
+let _conformalScores    = null;
+let _gateWeights        = null;
+let _currentRegime      = null;
+let _currentRegimeState = -1;   // HMM state integer (0=Panic,1=Bear,2=Chop,3=Bull)
+let _lgbmGlobal         = null;
 
 // ─── JSON loader helper ───────────────────────────────────────────────────────
 function loadJson(filename) {
@@ -52,44 +127,44 @@ function init() {
   }
   if (_gateWeights)     console.log('[ml_engine] SHAP gate weights loaded.');
   if (_conformalScores) console.log('[ml_engine] Conformal scores loaded.');
+
+  // Eagerly load global LGBM2c (1.76 MB, cached in lgbmInfer)
+  if (fs.existsSync(LGBM_GLOBAL_PATH)) {
+    try {
+      _lgbmGlobal = loadModel(LGBM_GLOBAL_PATH);
+      console.log(`[ml_engine] LGBM2c global loaded (${_lgbmGlobal.num_trees} trees).`);
+    } catch (e) {
+      console.error('[ml_engine] Failed to load lgbm2c_global_js.json:', e.message);
+    }
+  } else {
+    console.log('[ml_engine] WARN: lgbm2c_global_js.json not found — ML scoring disabled');
+  }
 }
 
 // ─── HMM Viterbi ─────────────────────────────────────────────────────────────
-/**
- * Gaussian log-likelihood for a single state component.
- * p: {means:[...], covars:[...]}  obs: number[]
- */
 function gaussianLogLikelihood(means, covars, obs) {
   let ll = 0;
   for (let i = 0; i < means.length; i++) {
-    const d   = obs[i] - means[i];
+    const d    = obs[i] - means[i];
     const var_ = covars[i];
     ll += -0.5 * (Math.log(2 * Math.PI * var_) + d * d / var_);
   }
   return ll;
 }
 
-/**
- * viterbiDecode(obsMatrix) — full Viterbi decoding over observation sequence
- * obsMatrix: number[][] — [T, nFeatures], already z-scored using HMM scaler
- * Returns: number[] — state sequence
- */
 function viterbiDecode(obsMatrix) {
   if (!_hmmParams) return null;
   const { n_components, startprob, transmat, means, covars } = _hmmParams;
   const T = obsMatrix.length;
   const N = n_components;
 
-  const delta  = Array.from({length: T}, () => new Float64Array(N));
-  const psi    = Array.from({length: T}, () => new Int32Array(N));
+  const delta = Array.from({length: T}, () => new Float64Array(N));
+  const psi   = Array.from({length: T}, () => new Int32Array(N));
 
-  // Initialise
   for (let j = 0; j < N; j++) {
     delta[0][j] = Math.log(startprob[j] + 1e-300) +
                   gaussianLogLikelihood(means[j], covars[j], obsMatrix[0]);
   }
-
-  // Recursion
   for (let t = 1; t < T; t++) {
     for (let j = 0; j < N; j++) {
       let best = -Infinity, bestState = 0;
@@ -102,36 +177,25 @@ function viterbiDecode(obsMatrix) {
     }
   }
 
-  // Backtrack
   const states = new Int32Array(T);
   let best = -Infinity;
   for (let j = 0; j < N; j++) {
     if (delta[T-1][j] > best) { best = delta[T-1][j]; states[T-1] = j; }
   }
-  for (let t = T-2; t >= 0; t--) {
-    states[t] = psi[t+1][states[t+1]];
-  }
+  for (let t = T-2; t >= 0; t--) states[t] = psi[t+1][states[t+1]];
   return Array.from(states);
 }
 
-/**
- * computeRegime(niftyBars) — derive regime from recent Nifty OHLCV bars
- * niftyBars: [{date, open, high, low, close, volume}, ...]  (at least 30)
- * Returns: {regime: string, state: number, score: number}
- */
 function computeRegime(niftyBars) {
   if (!_hmmParams || !niftyBars || niftyBars.length < 10) {
     return { regime: _currentRegime || 'Unknown', state: -1, score: 0.5 };
   }
 
   const { scaler_mean, scaler_scale, regime_map } = _hmmParams;
-
-  // Build observation matrix: [ret, vol20, trend, vol_ratio, sg_vel]
-  const bars   = niftyBars.slice(-250);  // need 200+ bars for EMA200 convergence
+  const bars   = niftyBars.slice(-250);
   const closes = bars.map(b => b.close);
   const vols   = bars.map(b => b.volume || 1);
 
-  // EMA50 and EMA200 for trend feature (must match Python data_utils.py training)
   const k50 = 2 / 51, k200 = 2 / 201;
   let e50 = closes[0], e200 = closes[0];
   const e50s = [], e200s = [];
@@ -144,17 +208,15 @@ function computeRegime(niftyBars) {
   const obsMatrix = [];
   for (let i = 20; i < bars.length; i++) {
     const ret      = closes[i] / closes[i-1] - 1;
-    // vol20 must be std of RETURNS (matching Python: pd.Series(ret).rolling(20).std())
     const retSlice = [];
     for (let k = Math.max(1, i - 19); k <= i; k++) retSlice.push(closes[k] / closes[k-1] - 1);
-    const vol20    = stdDev(retSlice);
-    const trend    = (e50s[i] - e200s[i]) / (e200s[i] || 1);
-    const vol20avg = mean(vols.slice(i-20, i));
-    const vol_ratio = vol20avg > 0 ? vols[i] / vol20avg : 1;
-    const sgv      = sgVelocity(closes.slice(Math.max(0, i-10), i+1));
-    // z-score
-    const raw = [ret, vol20, trend, vol_ratio, sgv];
-    const zs  = raw.map((v, k) => scaler_scale[k] > 0
+    const vol20      = stdDev(retSlice);
+    const trend      = (e50s[i] - e200s[i]) / (e200s[i] || 1);
+    const vol20avg   = mean(vols.slice(i-20, i));
+    const vol_ratio  = vol20avg > 0 ? vols[i] / vol20avg : 1;
+    const sgv        = sgVelocity(closes.slice(Math.max(0, i-10), i+1));
+    const raw        = [ret, vol20, trend, vol_ratio, sgv];
+    const zs         = raw.map((v, k) => scaler_scale[k] > 0
       ? (v - scaler_mean[k]) / scaler_scale[k] : 0);
     obsMatrix.push(zs);
   }
@@ -163,23 +225,17 @@ function computeRegime(niftyBars) {
     return { regime: _currentRegime || 'Unknown', state: -1, score: 0.5 };
   }
 
-  const states = viterbiDecode(obsMatrix);
+  const states    = viterbiDecode(obsMatrix);
   const lastState = states[states.length - 1];
   const regime    = regime_map[String(lastState)] || 'Unknown';
-  _currentRegime  = regime;
+  _currentRegime      = regime;
+  _currentRegimeState = lastState;
 
-  // Regime score: Bull=1.0, Bear=0.4, Chop=0.2, Panic=0.0
   const SCORE_MAP = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.4, 'Chop': 0.2, 'High-Vol-Panic': 0.0 };
-  const score = SCORE_MAP[regime] ?? 0.5;
-
-  return { regime, state: lastState, score };
+  return { regime, state: lastState, score: SCORE_MAP[regime] ?? 0.5 };
 }
 
 // ─── Conformal Prediction ─────────────────────────────────────────────────────
-/**
- * getConfidenceInterval(rawScore, alpha=0.10)
- * Returns {lower, upper, q} — conformal prediction interval
- */
 function getConfidenceInterval(rawScore, alpha = 0.10) {
   if (!_conformalScores) {
     return { lower: Math.max(0, rawScore - 0.15), upper: Math.min(1, rawScore + 0.15), q: 0.15 };
@@ -190,128 +246,89 @@ function getConfidenceInterval(rawScore, alpha = 0.10) {
   }
   const idx = Math.ceil((1 - alpha) * scores.length) - 1;
   const q   = scores[Math.min(Math.max(idx, 0), scores.length - 1)];
-  return {
-    lower: Math.max(0, rawScore - q),
-    upper: Math.min(1, rawScore + q),
-    q,
-  };
+  return { lower: Math.max(0, rawScore - q), upper: Math.min(1, rawScore + q), q };
 }
 
 // ─── SHAP Gate Weights ────────────────────────────────────────────────────────
 function getGateWeights() {
-  if (!_gateWeights) return {};
-  return _gateWeights.gate_weights || {};
+  return _gateWeights ? (_gateWeights.gate_weights || {}) : {};
 }
 
-/**
- * applyGateWeights(gates) — multiply gate truth values by SHAP importance
- * gates: {gateId: boolean}
- * Returns: {gateId: weight}  — 0 if gate failed, weight if passed
- */
 function applyGateWeights(gates) {
   const weights = getGateWeights();
   const result  = {};
   for (const [gate, passed] of Object.entries(gates)) {
-    const w = weights[gate] || 1.0;
-    result[gate] = passed ? w : 0;
+    result[gate] = passed ? (weights[gate] || 1.0) : 0;
   }
   return result;
 }
 
-// ─── HTTP call to predict_server ─────────────────────────────────────────────
-function callServer(endpoint, body, method = 'POST') {
-  return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
-    const headers = { 'Content-Type': 'application/json' };
-    if (method !== 'GET') headers['Content-Length'] = Buffer.byteLength(payload);
-    const req = http.request({
-      host:    PREDICT_HOST,
-      port:    PREDICT_PORT,
-      path:    endpoint,
-      method,
-      headers,
-    }, (res) => {
-      let data = '';
-      res.on('data', d => { data += d; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Invalid JSON from predict_server')); }
-      });
-    });
-    req.on('error', reject);
-    // destroy emits 'error' which calls reject — avoid double-rejection by not calling reject here
-    req.setTimeout(3000, () => { req.destroy(new Error('predict_server timeout')); });
-    if (method !== 'GET') req.write(payload);
-    req.end();
-  });
-}
-
-async function probeServer() {
-  const now = Date.now();
-  if (_serverAvailable !== null && (now - _serverProbeTime) < _PROBE_TTL_MS) {
-    return _serverAvailable;
-  }
-  try {
-    const r = await callServer('/health', {}, 'GET');
-    _serverAvailable = r.status === 'ok';
-  } catch { _serverAvailable = false; }
-  _serverProbeTime = Date.now();
-  return _serverAvailable;
-}
-
-// ─── Ensemble Score ───────────────────────────────────────────────────────────
+// ─── LGBM2c Ensemble Score (pure JS) ─────────────────────────────────────────
 /**
- * getEnsembleScore(features) — call predict_server for ensemble prediction
- * features: object with FEATURE_COLS keys
- * Returns: {stackScore, xgbScore, lgbmScore, confLower, confUpper} or null
+ * getEnsembleScore(features) — LGBM2c global + regime-specific blend
+ * Returns: {stackScore, xgbScore, lgbmScore, regimeScore, confLower, confUpper}
+ * or null if models not loaded.
  */
 async function getEnsembleScore(features) {
-  const available = await probeServer();
-  if (!available) return null;
-  try {
-    const res = await callServer('/predict_ensemble', features);
-    const e   = (res.ensemble || [])[0];
-    if (!e) return null;
-    return {
-      stackScore:   e.stack_score,
-      xgbScore:     e.xgb_score,
-      lgbmScore:    e.lgbm_score,
-      regimeScore:  e.regime_score,
-      softScore:    e.soft_score,
-      confLower:    e.conf_lower,
-      confUpper:    e.conf_upper,
-    };
-  } catch {
-    return null;
+  if (!_lgbmGlobal) return null;
+
+  const vec = buildFeatureVector(features);
+
+  // Global model score
+  const globalScore = predictOne(_lgbmGlobal, vec);
+
+  // Regime-specific model score (fall back to global if unavailable)
+  let regimeScore = globalScore;
+  const stateIdx  = _currentRegimeState;
+  if (stateIdx >= 0 && stateIdx <= 3) {
+    try {
+      const regimeModel = loadModel(LGBM_REGIME_PATHS[stateIdx]);
+      regimeScore = predictOne(regimeModel, vec);
+    } catch { /* file missing or corrupt — use global */ }
   }
+
+  // 50/50 blend (matches predict_server.py)
+  const stackScore = 0.5 * globalScore + 0.5 * regimeScore;
+  const ci = getConfidenceInterval(stackScore);
+
+  return {
+    stackScore,
+    xgbScore:   null,
+    lgbmScore:  stackScore,
+    regimeScore,
+    softScore:  null,
+    confLower:  ci.lower,
+    confUpper:  ci.upper,
+  };
 }
 
-// ─── Position Size ────────────────────────────────────────────────────────────
+// ─── PPO Position Size (pure JS) ─────────────────────────────────────────────
 /**
- * getPositionSize(features, regime) — call predict_server for PPO sizing
- * Returns: number (0, 0.25, 0.50, 0.75, or 1.00) or 0.5 as default
+ * getPositionSize(features, _regime) — PPO actor forward pass
+ * Returns: number in {0.0, 0.25, 0.50, 0.75, 1.0}
  */
-async function getPositionSize(features, regime) {
-  const available = await probeServer();
-  if (!available) return 0.5;
+async function getPositionSize(features, _regime) {
+  if (!fs.existsSync(PPO_WEIGHTS_PATH)) return 0.5;
+
+  const vec = buildFeatureVector(features);
+
+  // LGBM2c score feeds into PPO input[56]
+  const lgbm2cScore = _lgbmGlobal ? predictOne(_lgbmGlobal, vec) : 0.5;
+
+  // PPO takes first 56 base features
+  const feat56 = vec.slice(0, 56);
+
   try {
-    const res = await callServer(
-      `/position_size?regime=${encodeURIComponent(regime || 'Bull-Trend')}`,
-      features
-    );
-    const sizes = res.position_sizes || [];
-    return sizes[0] ?? 0.5;
+    const result = ppoPredict(feat56, lgbm2cScore, PPO_WEIGHTS_PATH);
+    return result.size;
   } catch {
     return 0.5;
   }
 }
 
-// ─── Regime-based signal gate ─────────────────────────────────────────────────
-/**
- * isRegimeAllowed(regime) — block Chop / High-Vol-Panic from producing signals
- */
+// ─── Regime gate ──────────────────────────────────────────────────────────────
 function isRegimeAllowed(regime) {
-  if (!regime || regime === 'Unknown') return true;   // no model = allow
+  if (!regime || regime === 'Unknown') return true;
   return regime === 'Bull-Trend' || regime === 'Bear-Trend';
 }
 
@@ -327,10 +344,9 @@ function stdDev(arr) {
   return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / (arr.length - 1)) + 1e-8;
 }
 
-function sgVelocity(closes, deg = 2) {
+function sgVelocity(closes) {
   const n = closes.length;
   if (n < 5) return 0;
-  // simple linear regression slope as SG-velocity proxy
   const xs = Array.from({length: n}, (_, i) => i);
   const xm = mean(xs), ym = mean(closes);
   let num = 0, den = 0;
@@ -351,6 +367,7 @@ module.exports = {
   getEnsembleScore,
   getPositionSize,
   isRegimeAllowed,
-  getCurrentRegime: () => _currentRegime || 'Unknown',
-  isServerAvailable: () => _serverAvailable,
+  getCurrentRegime:      () => _currentRegime || 'Unknown',
+  getCurrentRegimeState: () => _currentRegimeState,
+  isServerAvailable:     () => true,   // always available — pure JS
 };
