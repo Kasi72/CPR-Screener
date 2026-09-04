@@ -653,7 +653,7 @@ function calcRSISeries(closes, period = 14, lookback = 10) {
   return out;
 }
 
-function rsiDivergence(closes, rsiVals, window = 5) {
+function rsiDivergence(closes, rsiVals, window = 20) {
   const n = closes.length, m = rsiVals.length;
   if (n < window + 2 || m < window + 2) return null;
   const pc = closes.slice(-window-1, -1), pr = rsiVals.slice(-window-1, -1);
@@ -1386,16 +1386,24 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       const open_to_cpr_dist = cpr.width > 0 ? (last.open - _cprMid) / cpr.width : 0;
       const open_inside_cpr  = (last.open >= cpr.lower && last.open <= cpr.upper) ? 1 : 0;
 
-      // atr_to_cpr_ratio: ATR14 / CPR width
+      // atr_to_cpr_ratio: Wilder ATR(14) / CPR width — matches calcATRRank method
       const _atr14 = (() => {
-        if (hHighs.length < 2) return hHighs.length ? hHighs[0] - hLows[0] : 0;
-        const len = Math.min(14, hHighs.length - 1);
-        let s = 0;
-        for (let i = hHighs.length - len; i < hHighs.length; i++) {
-          const pc = hCloses[i - 1];
-          s += Math.max(hHighs[i] - hLows[i], Math.abs(hHighs[i] - pc), Math.abs(hLows[i] - pc));
+        const n = hHighs.length;
+        if (n < 2) return n ? hHighs[0] - hLows[0] : 0;
+        const period = 14;
+        const tr = i => Math.max(
+          hHighs[i] - hLows[i],
+          Math.abs(hHighs[i] - hCloses[i - 1]),
+          Math.abs(hLows[i]  - hCloses[i - 1])
+        );
+        if (n < period + 1) {
+          let s = 0; for (let i = 1; i < n; i++) s += tr(i);
+          return s / (n - 1);
         }
-        return s / len;
+        // Wilder seed: SMA of first 'period' TRs
+        let atr = 0; for (let i = 1; i <= period; i++) atr += tr(i); atr /= period;
+        for (let i = period + 1; i < n; i++) atr = (atr * (period - 1) + tr(i)) / period;
+        return atr;
       })();
       const atr_to_cpr_ratio = cpr.width > 0 ? _atr14 / cpr.width : 1;
 
