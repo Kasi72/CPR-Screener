@@ -294,7 +294,7 @@ async function getEnsembleScore(features) {
   return {
     stackScore,
     xgbScore:   null,
-    lgbmScore:  stackScore,
+    lgbmScore:  globalScore,
     regimeScore,
     softScore:  null,
     confLower:  ci.lower,

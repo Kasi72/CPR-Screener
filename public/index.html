@@ -2621,7 +2621,7 @@ const App = {
         rec.positionLabel, ml.regime || '', rec.regimeMult != null ? rec.regimeMult.toFixed(1) : '',
         s.confluenceScore, s.confluencePass ? 1 : 0,
         (s.qualityPassedRules || []).join('|'), s.primaryRule || '',
-        s.bestPred != null ? (s.bestPred * 100).toFixed(2) : '',
+        s.bestPred != null ? s.bestPred.toFixed(2) : '',
         ml.stackScore != null ? (ml.stackScore * 100).toFixed(1) : '',
         gg.adx     ? gg.adx.value     : '',
         gg.atrPct  ? gg.atrPct.value  : '',

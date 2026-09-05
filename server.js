@@ -1307,13 +1307,16 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     let featureList = [];
     const rulesToPredict = qualityPassedRules.length > 0 ? qualityPassedRules : matchedRules;
 
-    if (rulesToPredict.length > 0 && xgbAvailable) {
+    if (rulesToPredict.length > 0) {
       // Use full historical arrays (365-bar) so features match training window sizes
       const dow      = new Date().getDay();
 
       // Shared cross-rule features computed once from histBars
-      const hi52      = hHighs.length > 0 ? Math.max(...hHighs) : last.close;
-      const lo52      = hLows.length  > 0 ? Math.min(...hLows)  : last.close;
+      // Include today's bar in 52-week extremes so a new breakout day is correctly scored
+      const _hiMaxHist = hHighs.length > 0 ? Math.max(...hHighs) : 0;
+      const _loMinHist = hLows.length  > 0 ? Math.min(...hLows)  : Infinity;
+      const hi52      = Math.max(_hiMaxHist, last.high || 0) || last.close;
+      const lo52      = Math.min(_loMinHist, last.low  > 0 ? last.low : last.close) || last.close;
       const dist_hi52 = last.close > 0 ? (hi52 - last.close) / last.close : 0;
       const dist_lo52 = last.close > 0 ? (last.close - lo52)  / last.close : 0;
       // vol_accel: 3-bar avg / 20-bar avg (vol3avg/vol20avg already computed above)
@@ -1337,8 +1340,10 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
 
       const gap_pct = prevClose > 0 ? (last.open - prevClose) / prevClose : 0;
 
-      // atr_expansion: today ATR vs 10-day avg ATR
-      const _atrToday = hHighs.length > 0 ? hHighs[hHighs.length-1] - hLows[hLows.length-1] : 0;
+      // atr_expansion: today range vs 10-day avg range (use today's live bar, not yesterday's)
+      const _atrToday = (last.high > 0 && last.low > 0)
+        ? last.high - last.low
+        : (hHighs.length > 0 ? hHighs[hHighs.length-1] - hLows[hLows.length-1] : 0);
       let _atr10avg = _atrToday;
       if (hHighs.length >= 10) {
         const _atrs = hHighs.slice(-10).map((h, i) => h - hLows[hLows.length - 10 + i]);
@@ -1359,9 +1364,10 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       }
 
       // days_since_52hi: bars-ago index of 52w high, normalized to trading-year
-      const _hiMax = hHighs.length > 0 ? Math.max(...hHighs) : last.close;
-      const _hi52idx = hHighs.lastIndexOf(_hiMax);
-      const days_since_52hi = hHighs.length > 0 ? (hHighs.length - 1 - _hi52idx) / 252 : 0;
+      // days_since_52hi: 0 if today is the 52w high, else look back in hHighs
+      const days_since_52hi = (last.high || 0) >= _hiMaxHist
+        ? 0
+        : (hHighs.length > 0 ? (hHighs.length - 1 - hHighs.lastIndexOf(_hiMaxHist)) / 252 : 0);
 
       // expiry_dist: fraction of 30-day window remaining to last Thursday of current month
       const _now = new Date();
@@ -1558,9 +1564,9 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         return {
           cpr_width_pct: cpr.widthPct,
           vwap_dist:     vwap > 0 ? (last.close - vwap) / vwap : 0,
-          atr_pct_rank:  calcATRRank(hHighs, hLows, hCloses),
+          atr_pct_rank:  atrPctVal,
           vol_rank,
-          n_rules_fired: qualityPassedRules.length || matchedRules.length,
+          n_rules_fired: matchedRules.length,
           sg_vel:        xSgVel,
           ema200_dist:   ema200val > 0 ? (last.close - ema200val) / ema200val : 0,
           rsi14:         xRsi14,
@@ -1637,11 +1643,13 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         };
       });
 
-      const preds = await xgbPredict(featureList);
-      if (preds) {
-        rulesToPredict.forEach((rid, i) => {
-          predReturnByRule[rid] = +(preds[i] * 100).toFixed(3);
-        });
+      if (xgbAvailable) {
+        const preds = await xgbPredict(featureList);
+        if (preds) {
+          rulesToPredict.forEach((rid, i) => {
+            predReturnByRule[rid] = +(preds[i] * 100).toFixed(3);
+          });
+        }
       }
     }
 
