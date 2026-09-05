@@ -537,6 +537,9 @@ async function loadPCR() {
   }
 }
 
+// Startup readiness flag — screener returns 503 until initial data loaded
+let _serverReady = false;
+
 // Load at startup; refresh every 6 hours
 mlEngine.init();
 Promise.all([
@@ -544,6 +547,7 @@ Promise.all([
   loadSectorData(),
   loadBhavCopy(),
 ]).then(() => {
+  _serverReady = true;
   if (niftyBarsCache.length >= 10) {
     const r = mlEngine.computeRegime(niftyBarsCache);
     console.log(`  ML Regime: ${r.regime} (score=${r.score})`);
@@ -1327,8 +1331,8 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
 
       // Shared cross-rule features computed once from histBars
       // Include today's bar in 52-week extremes so a new breakout day is correctly scored
-      const _hiMaxHist = hHighs.length > 0 ? Math.max(...hHighs) : 0;
-      const _loMinHist = hLows.length  > 0 ? Math.min(...hLows)  : Infinity;
+      const _hiMaxHist = hHighs.length > 0 ? hHighs.reduce((m, v) => v > m ? v : m, hHighs[0]) : 0;
+      const _loMinHist = hLows.length  > 0 ? hLows.reduce((m, v) => v < m ? v : m, hLows[0])   : Infinity;
       const hi52      = Math.max(_hiMaxHist, last.high || 0) || last.close;
       const lo52      = Math.min(_loMinHist, last.low  > 0 ? last.low : last.close) || last.close;
       const dist_hi52 = last.close > 0 ? (hi52 - last.close) / last.close : 0;
@@ -1745,7 +1749,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       const cprWidthBonus = cprWidthPct < 0.3 ? 0.5 : cprWidthPct > 1.0 ? -0.5 : 0;
       const mlScoreBonus  = (mlConf - 0.5) * 6.0;
       const _regimeMult   = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.7, 'Chop': 0.4, 'High-Vol-Panic': 0.0 };
-      const regimeMult    = _regimeMult[currentRegimeForGates] ?? 0.6;
+      const regimeMult    = _regimeMult[currentRegimeForGates] ?? 1.0;
       confluenceScore     = (rawSharpeSum + cprWidthBonus + mlScoreBonus) * regimeMult;
       confluencePass      = confluenceScore >= CONFLUENCE_THRESHOLD;
     }
@@ -1894,6 +1898,11 @@ app.get('/api/market-status', (_req, res) => {
 });
 
 app.get('/api/screen/stream', async (req, res) => {
+  if (!_serverReady) {
+    res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '5' });
+    return res.end(JSON.stringify({ error: 'Server warming up — retry in 5s' }));
+  }
+
   res.writeHead(200, {
     'Content-Type':  'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -1901,20 +1910,26 @@ app.get('/api/screen/stream', async (req, res) => {
     'X-Accel-Buffering': 'no'
   });
 
-  const tf       = req.query.tf || '1d';
-  const mode     = req.query.mode || 'any';
-  const narrow   = parseFloat(req.query.narrow) || 0.5;
+  const VALID_TF   = new Set(['1d', '1w', '1m']);
+  const VALID_MODE = new Set(['any', 'all']);
+  const tf       = VALID_TF.has(req.query.tf)   ? req.query.tf   : '1d';
+  const mode     = VALID_MODE.has(req.query.mode) ? req.query.mode : 'any';
+  const narrowRaw = parseFloat(req.query.narrow);
+  const narrow   = (isFinite(narrowRaw) && narrowRaw >= 0 && narrowRaw <= 10) ? narrowRaw : 0.5;
   const rules    = (req.query.rules || Object.keys(RULES).join(',')).split(',').filter(r => RULES[r]);
   const listName = req.query.list;
   const symStr   = req.query.symbols;
-  const qualityFilter  = req.query.quality !== 'false';   // default: show quality gates
+  const qualityFilter  = req.query.quality !== 'false';
   const disabledGates  = (req.query.disabledGates || '').split(',').filter(Boolean);
 
   let symbols;
   if (listName && STOCK_LISTS[listName]) {
     symbols = STOCK_LISTS[listName];
   } else if (symStr) {
-    symbols = symStr.split(',').filter(Boolean);
+    const MAX_SYMBOLS = 500;
+    const rawSymbols = symStr.split(',').filter(Boolean).slice(0, MAX_SYMBOLS);
+    const SYMBOL_RE  = /^[A-Z0-9&_\-\.]{1,20}$/;
+    symbols = rawSymbols.filter(s => SYMBOL_RE.test(s));
   } else {
     symbols = STOCK_LISTS['Nifty 50'] || NSE_SYMBOLS;
   }

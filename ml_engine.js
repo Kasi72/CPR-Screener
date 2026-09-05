@@ -71,11 +71,12 @@ const _P2C_DEFAULTS = {
 function buildFeatureVector(f) {
   const dir = f.direction ?? 1;
 
-  // Resolve a single feature: apply default then directional flip
+  // Resolve a single feature: apply default then directional flip, guard NaN/Inf
   function get(name) {
-    const raw = (f[name] !== undefined && f[name] !== null) ? f[name]
+    const raw = (f[name] !== undefined && f[name] !== null && isFinite(f[name])) ? f[name]
               : (_P2C_DEFAULTS[name] !== undefined ? _P2C_DEFAULTS[name] : 0);
-    return _P2C_DIRECTIONAL.has(name) ? raw * dir : raw;
+    const val = _P2C_DIRECTIONAL.has(name) ? raw * dir : raw;
+    return isFinite(val) ? val : 0;
   }
 
   const vec = new Float32Array(63);
@@ -86,13 +87,14 @@ function buildFeatureVector(f) {
   // Interaction features (indices 56-62)
   // NOTE: Python computes interactions AFTER flipping base features in-place,
   // so get() already returns flipped values — the formulas below match Python.
-  vec[56] = get('cpr_compress')   * get('vol_rank');                           // cpr_vol_interaction
-  vec[57] = get('hmm_regime')     * get('mom5');                               // regime_momentum
-  vec[58] = (1.0 - get('cpr_width_pct')) * get('rsi14');                      // cpr_rsi_squeeze
-  vec[59] = get('cpr_overlap_pct') * get('cpr_zone_vol_ratio');                // overlap_vol_signal
-  vec[60] = (get('market_rs_5d') + get('sector_rs_5d')) * dir;                // rs_direction_alignment
-  vec[61] = get('cpr_virgin')     * get('mom5');                               // virgin_momentum
-  vec[62] = get('consecutive_narrow_cprs') * get('vol_rank');                  // narrow_breakout_vol
+  function finiteOr0(v) { return isFinite(v) ? v : 0; }
+  vec[56] = finiteOr0(get('cpr_compress')   * get('vol_rank'));
+  vec[57] = finiteOr0(get('hmm_regime')     * get('mom5'));
+  vec[58] = finiteOr0((1.0 - get('cpr_width_pct')) * get('rsi14'));
+  vec[59] = finiteOr0(get('cpr_overlap_pct') * get('cpr_zone_vol_ratio'));
+  vec[60] = finiteOr0((get('market_rs_5d') + get('sector_rs_5d')) * dir);
+  vec[61] = finiteOr0(get('cpr_virgin')     * get('mom5'));
+  vec[62] = finiteOr0(get('consecutive_narrow_cprs') * get('vol_rank'));
 
   return vec;
 }
@@ -288,7 +290,9 @@ async function getEnsembleScore(features) {
   }
 
   // 50/50 blend (matches predict_server.py)
-  const stackScore = 0.5 * globalScore + 0.5 * regimeScore;
+  const rawBlend = 0.5 * globalScore + 0.5 * regimeScore;
+  const stackScore = isFinite(rawBlend) ? rawBlend : globalScore;
+  if (!isFinite(stackScore)) return null; // model produced garbage — skip
   const ci = getConfidenceInterval(stackScore);
 
   return {

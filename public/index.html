@@ -1246,6 +1246,7 @@ tr.match-1 td:first-child  { border-left: 3px solid var(--green); }
 .rec-STRONG-BUY  { background: rgba(34,197,94,0.18);  color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
 .rec-BUY         { background: rgba(74,222,128,0.12); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
 .rec-SPECULATIVE { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+.rec-WATCH       { background: rgba(99,102,241,0.12);  color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
 .rec-NEUTRAL     { background: rgba(107,114,128,0.1); color: #9ca3af; border: 1px solid rgba(107,114,128,0.25); }
 .rec-AVOID       { background: rgba(239,68,68,0.1);   color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
 .rec-conf        { font-size: 9px; opacity: 0.7; margin-left: 4px; font-weight: 600; }
@@ -1637,7 +1638,7 @@ function computeRecommendation(stock) {
   }
 
   // ── Priority 1: lgbm2c_score as primary confidence (replaces AUC-0.572 logistic weights) ──
-  const stackScore   = ml.stackScore != null ? ml.stackScore : 0.5;
+  const stackScore   = (ml.stackScore != null && isFinite(ml.stackScore)) ? ml.stackScore : 0.5;
   const conf         = Math.round(stackScore * 100);   // 0–100
   const why          = [`LGBM2c score ${(stackScore*100).toFixed(1)}% → conf ${conf}`];
 
@@ -1683,6 +1684,7 @@ function computeRecommendation(stock) {
   if      (adjConf >= 62 && rr >= 2.0 && stock.confluencePass && regimeAllowed) tier = 'STRONG BUY';
   else if (adjConf >= 50 && rr >= 1.5 && regimeAllowed)                         tier = 'BUY';
   else if (adjConf >= 38 && rr >= 1.2)                                           tier = 'SPECULATIVE';
+  else if (adjConf >= 38)                                                        tier = 'WATCH';
   else                                                                           tier = 'AVOID';
 
   // ── Priority 3c: position size label ─────────────────────────────────────
@@ -2294,8 +2296,17 @@ const App = {
         }
       };
 
-      sse.onerror = () => {
+      sse.onerror = async () => {
         sse.close();
+        // Detect 503 warm-up and auto-retry once after 5s
+        try {
+          const probe = await fetch(`/api/screen/stream?${params}`, { method: 'HEAD' });
+          if (probe.status === 503) {
+            toast('Server warming up — retrying in 5s…');
+            setTimeout(() => { if (!State.isRunning) Screener.run(extra); }, 5000);
+            return;
+          }
+        } catch(_) {}
         State.isRunning = false;
         runBtn.disabled = false;
         runText.textContent = '▶ Run Screener';
