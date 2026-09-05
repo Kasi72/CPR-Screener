@@ -2262,6 +2262,10 @@ const App = {
           State.errors++;
           State.scanned = msg.done;
           console.warn(`[screener err] ${msg.sym}: ${msg.msg}`);
+          const pct = total > 0 ? (msg.done / total * 100) : 0;
+          $('progressFill').style.width = pct + '%';
+          $('progressText').textContent = `${msg.done} / ${total} — ${msg.matched} matched`;
+          this.updateStats(msg.done, msg.matched, State.errors, null);
         }
 
         if (msg.type === 'done') {
@@ -2298,12 +2302,17 @@ const App = {
 
       sse.onerror = async () => {
         sse.close();
-        // Detect 503 warm-up and auto-retry once after 5s
+        // Detect 503 warm-up and auto-retry
         try {
           const probe = await fetch(`/api/screen/stream?${params}`, { method: 'HEAD' });
           if (probe.status === 503) {
             toast('Server warming up — retrying in 5s…');
-            setTimeout(() => { if (!State.isRunning) Screener.run(extra); }, 5000);
+            // Reset running state so retry can start a fresh run
+            State.isRunning = false;
+            runBtn.disabled = false;
+            runText.textContent = '▶ Run Screener';
+            $('progressWrap').style.display = 'none';
+            setTimeout(() => Screener.run(extra), 5000);
             return;
           }
         } catch(_) {}
