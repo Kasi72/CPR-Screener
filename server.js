@@ -492,7 +492,7 @@ async function loadBhavCopy() {
       const highIdx  = header.indexOf('HIGH_PRICE');
       const lowIdx   = header.indexOf('LOW_PRICE');
       const closeIdx = header.indexOf('CLOSE_PRICE');
-      const volIdx   = header.indexOf('TOT_TRAD_QTY');
+      const volIdx   = header.indexOf('TTL_TRD_QNTY');
       const map = {}, ohlcMap = {};
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',');
@@ -983,8 +983,14 @@ const TF = {
     getPrev: async (sym) => {
       const d = await fetchYahoo(sym, '1d', '5d');
       const bars = extractBars(d);
-      if (bars.length < 2) throw new Error('No daily history');
-      return bars[bars.length - 2];
+      if (bars.length < 1) throw new Error('No daily history');
+      const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+      const lastTs = bars[bars.length - 1].time;
+      if (lastTs >= todayMidnight.getTime()) {
+        if (bars.length < 2) throw new Error('No previous daily bar');
+        return bars[bars.length - 2];
+      }
+      return bars[bars.length - 1];
     },
     getCurrent: async (sym) => {
       const d = await fetchYahoo(sym, '5m', '1d');
@@ -1467,8 +1473,8 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
 
       // prev_bar_close_pos: yesterday close position within yesterday's CPR (0=below bc, 1=above tc)
       let prev_bar_close_pos = 0.5;
-      if (prev_cpr && (prev_cpr.tc - prev_cpr.bc) > 0) {
-        prev_bar_close_pos = Math.max(0, Math.min(1, (_ydayClose - prev_cpr.bc) / (prev_cpr.tc - prev_cpr.bc)));
+      if (prev_cpr && (prev_cpr.upper - prev_cpr.lower) > 0) {
+        prev_bar_close_pos = Math.max(0, Math.min(1, (_ydayClose - prev_cpr.lower) / (prev_cpr.upper - prev_cpr.lower)));
       }
 
       // prev_day_ochoa_type: yesterday candle body classification (0=doji,1=bearish,2=neutral,3=bullish)
@@ -1572,7 +1578,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           rsi_dir,
           hi52_dir,
           // Sprint 3 + momentum features
-          cpr_pos:        (cpr.tc - cpr.bc) > 0 ? (last.close - cpr.bc) / (cpr.tc - cpr.bc) : 0.5,
+          cpr_pos:        (cpr.upper - cpr.lower) > 0 ? (last.close - cpr.lower) / (cpr.upper - cpr.lower) : 0.5,
           dist_r1:        last.close > 0 ? Math.max(-0.15, Math.min(0.15, (last.close - (2 * cpr.pivot - prevPeriod.low))  / last.close)) : 0,
           dist_s1:        last.close > 0 ? Math.max(-0.15, Math.min(0.15, (last.close - (2 * cpr.pivot - prevPeriod.high)) / last.close)) : 0,
           mom3:           xMom3,
