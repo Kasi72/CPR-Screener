@@ -1933,15 +1933,21 @@ app.get('/api/screen/stream', async (req, res) => {
     symbols = STOCK_LISTS['Nifty 50'] || NSE_SYMBOLS;
   }
 
+  // Resume support: skip already-processed symbols on reconnect
+  const offsetRaw = parseInt(req.query.offset) || 0;
+  const offset    = (offsetRaw >= 0 && offsetRaw < symbols.length) ? offsetRaw : 0;
+  if (offset > 0) symbols = symbols.slice(offset);
+
   const emit = obj => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
 
-  emit({ type: 'start', total: symbols.length, tf, rules, mode,
+  const totalAll = offset + symbols.length;
+  emit({ type: 'start', total: totalAll, offset, tf, rules, mode,
          marketStatus: {
            vix:   { value: latestVix(), safe: latestVix() < 18 || latestVix() === 0 },
            nifty: latestNiftyAndEma()
          }});
 
-  let done = 0, matched = 0;
+  let done = offset, matched = 0;
   const t0 = Date.now();
   const BATCH = 30;
 

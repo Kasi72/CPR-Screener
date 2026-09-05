@@ -2302,20 +2302,31 @@ const App = {
 
       sse.onerror = async () => {
         sse.close();
-        // Detect 503 warm-up and auto-retry
+        const scannedSoFar = State.scanned || 0;
+        // Detect 503 warm-up
         try {
           const probe = await fetch(`/api/screen/stream?${params}`, { method: 'HEAD' });
           if (probe.status === 503) {
             toast('Server warming up — retrying in 5s…');
-            // Reset running state so retry can start a fresh run
             State.isRunning = false;
             runBtn.disabled = false;
             runText.textContent = '▶ Run Screener';
             $('progressWrap').style.display = 'none';
-            setTimeout(() => Screener.run(extra), 5000);
+            setTimeout(() => Screener.run(), 5000);
             return;
           }
         } catch(_) {}
+        // Partial scan — auto-resume from where we left off
+        if (scannedSoFar > 0 && scannedSoFar < total) {
+          toast(`Connection dropped at ${scannedSoFar} — resuming…`);
+          State.isRunning = false;
+          runBtn.disabled = false;
+          runText.textContent = '▶ Run Screener';
+          const resumeParams = new URLSearchParams(params);
+          resumeParams.set('offset', scannedSoFar);
+          setTimeout(() => Screener._resume(resumeParams, scannedSoFar, total, matched, t0), 2000);
+          return;
+        }
         State.isRunning = false;
         runBtn.disabled = false;
         runText.textContent = '▶ Run Screener';
@@ -2328,6 +2339,63 @@ const App = {
       runBtn.disabled = false;
       runText.textContent = '▶ Run Screener';
       toast('Error: ' + err.message);
+    }
+  },
+
+  // Resume a dropped SSE stream from a given offset, preserving existing results
+  async _resume(resumeParams, startDone, total, startMatched, t0) {
+    if (State.isRunning) return;
+    State.isRunning = true;
+    const runBtn  = $('runBtn');
+    const runText = $('runBtnText');
+    runBtn.disabled = true;
+    runText.textContent = '⏳ Scanning…';
+    $('progressWrap').style.display = '';
+    let done = startDone, matched = startMatched;
+    try {
+      const sse2 = new EventSource(`/api/screen/stream?${resumeParams}`);
+      sse2.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'tick') {
+          done = msg.done; matched = msg.matched;
+          State.scanned = done;
+          State.results.push(msg.result);
+          this.appendRow(msg.result);
+          const pct = total > 0 ? (done / total * 100) : 0;
+          $('progressFill').style.width = pct + '%';
+          $('progressText').textContent = `${done} / ${total} — ${matched} matched`;
+          this.updateStats(done, matched, State.errors, null);
+        } else if (msg.type === 'skip' || msg.type === 'err') {
+          done = msg.done; State.scanned = done;
+          if (msg.type === 'err') { State.errors++; console.warn(`[resume err] ${msg.sym}: ${msg.msg}`); }
+          const pct = total > 0 ? (done / total * 100) : 0;
+          $('progressFill').style.width = pct + '%';
+          $('progressText').textContent = `${done} / ${total} — ${matched} matched`;
+          this.updateStats(done, matched, State.errors, null);
+        } else if (msg.type === 'done') {
+          sse2.close();
+          State.isRunning = false;
+          runBtn.disabled = false;
+          runText.textContent = '▶ Run Screener';
+          $('progressWrap').style.display = 'none';
+          $('refreshPricesBtn').style.display = matched > 0 ? '' : 'none';
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          this.updateStats(msg.total, matched, State.errors, elapsed);
+        }
+      };
+      sse2.onerror = () => {
+        sse2.close();
+        State.isRunning = false;
+        runBtn.disabled = false;
+        runText.textContent = '▶ Run Screener';
+        $('progressWrap').style.display = 'none';
+        toast('Resume failed — connection lost');
+      };
+    } catch(err) {
+      State.isRunning = false;
+      runBtn.disabled = false;
+      runText.textContent = '▶ Run Screener';
+      toast('Resume error: ' + err.message);
     }
   },
 
