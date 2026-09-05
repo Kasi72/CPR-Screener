@@ -1,6 +1,14 @@
 node_modules
-models/
 scripts/
+# Exclude large binary/training-only files from models/ but keep JSON inference files
+models/*.pkl
+models/*.pt
+models/*.zip
+models/*.npz
+models/*.txt
+models/*.csv
+models/*.log
+models/best_model.zip
 *.py
 *.bat
 *.ps1
