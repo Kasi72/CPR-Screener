@@ -2312,7 +2312,7 @@ const App = {
             runBtn.disabled = false;
             runText.textContent = '▶ Run Screener';
             $('progressWrap').style.display = 'none';
-            setTimeout(() => Screener.run(), 5000);
+            setTimeout(() => this.run(), 5000);
             return;
           }
         } catch(_) {}
@@ -2324,7 +2324,7 @@ const App = {
           runText.textContent = '▶ Run Screener';
           const resumeParams = new URLSearchParams(params);
           resumeParams.set('offset', scannedSoFar);
-          setTimeout(() => Screener._resume(resumeParams, scannedSoFar, total, matched, t0), 2000);
+          setTimeout(() => this._resume(resumeParams, scannedSoFar, total, matched, t0), 2000);
           return;
         }
         State.isRunning = false;
