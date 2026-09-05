@@ -1117,8 +1117,22 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
 
     if (!prevPeriod || !currentBars.length) throw new Error('Insufficient data');
 
-    const last  = currentBars[currentBars.length - 1];
-    const prev2 = currentBars.length >= 2 ? currentBars[currentBars.length - 2] : null;
+    let last  = currentBars[currentBars.length - 1];
+    let prev2 = currentBars.length >= 2 ? currentBars[currentBars.length - 2] : null;
+
+    // Bhav staleness guard: Yahoo/NSE sometimes lags by one session (weekends, holidays,
+    // or Friday evening before Yahoo publishes). If bhav has a newer date than the
+    // Yahoo/NSE current bar, use bhav as the authoritative EOD bar so that price
+    // display and pricePosition reflect the correct session's close.
+    if (bhavPrevMap[symbol] && delivDate && last?.time) {
+      const lastBarDate = new Date(last.time).toISOString().slice(0, 10);
+      if (delivDate > lastBarDate) {
+        // bhav (e.g. Sep 4) is newer than Yahoo last bar (e.g. Sep 3)
+        // Promote bhav to "current" and demote old last to "previous"
+        prev2 = last;
+        last  = { ...bhavPrevMap[symbol], time: Date.now() };
+      }
+    }
 
     const cpr = calcCPR(prevPeriod.high, prevPeriod.low, prevPeriod.close);
     const cam = calcCamarilla(prevPeriod.high, prevPeriod.low, prevPeriod.close);
