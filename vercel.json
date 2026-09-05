@@ -5,29 +5,6 @@
       "maxDuration": 300
     }
   },
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "public/**",
-          "data/lists/**",
-          "models/lgbm2c_global_js.json",
-          "models/lgbm2c_regime_0_js.json",
-          "models/lgbm2c_regime_1_js.json",
-          "models/lgbm2c_regime_2_js.json",
-          "models/lgbm2c_regime_3_js.json",
-          "models/ppo_policy_weights.json",
-          "models/hmm_params.json",
-          "models/conformal_scores.json",
-          "models/shap_gate_weights.json",
-          "lib/lgbmInfer.js",
-          "lib/ppoInfer.js"
-        ]
-      }
-    }
-  ],
   "routes": [
     { "src": "/(.*)", "dest": "server.js" }
   ]
