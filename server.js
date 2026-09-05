@@ -441,9 +441,38 @@ async function loadSectorData() {
   }
 }
 
+async function bhavGet(url) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': NSE_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.nseindia.com/',
+        'Connection': 'keep-alive',
+      }
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', c => { body += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(body);
+        else reject(new Error(`HTTP ${res.statusCode}`));
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(20000, () => req.destroy(new Error('Timeout')));
+    req.end();
+  });
+}
+
 async function loadBhavCopy() {
-  // Try today then yesterday (bhav copy available ~6PM IST after market close)
-  for (let offset = 0; offset <= 1; offset++) {
+  // Try last 5 calendar days — covers weekends (2 days) + holidays; bhav published ~6PM IST
+  for (let offset = 0; offset <= 5; offset++) {
     const d    = new Date(Date.now() - offset * 86400000);
     const dd   = String(d.getDate()).padStart(2, '0');
     const mm   = String(d.getMonth() + 1).padStart(2, '0');
@@ -452,7 +481,7 @@ async function loadBhavCopy() {
     if (delivDate === key) return;
     try {
       const url  = `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${dd}${mm}${yyyy}.csv`;
-      const body = await httpsGet(url);
+      const body = await bhavGet(url);
       const lines  = body.split('\n');
       const header = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       const symIdx    = header.indexOf('SYMBOL');
@@ -1766,6 +1795,30 @@ app.get('/api/rules', (_req, res) => {
     id, name: r.name, desc: r.desc, color: r.color,
     sharpe: RULE_SHARPE[id] || 0
   })));
+});
+
+app.get('/api/bhav-debug', (req, res) => {
+  const sym  = (req.query.sym || '').toUpperCase();
+  const entry = sym ? bhavPrevMap[sym] : null;
+  res.json({
+    bhavDate:      delivDate || null,
+    bhavSymbols:   Object.keys(bhavPrevMap).length,
+    delivSymbols:  Object.keys(delivMap).length,
+    query:         sym || null,
+    ohlcv:         entry || (sym ? 'NOT_FOUND' : null),
+    cpr: entry ? (() => {
+      const pivot = (entry.high + entry.low + entry.close) / 3;
+      const bc    = (entry.high + entry.low) / 2;
+      const tc    = 2 * pivot - bc;
+      return {
+        pivot: +pivot.toFixed(4),
+        bc:    +bc.toFixed(4),
+        tc:    +tc.toFixed(4),
+        lower: +Math.min(tc, bc).toFixed(4),
+        upper: +Math.max(tc, bc).toFixed(4),
+      };
+    })() : null,
+  });
 });
 
 app.get('/api/symbols', (_req, res) => res.json(NSE_SYMBOLS));
