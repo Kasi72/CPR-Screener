@@ -218,7 +218,8 @@ async function fetchNSEDailyBars(symbol, days = 365) {
   }
 
   const allBars = [];
-  for (const chunk of chunks) {
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk  = chunks[ci];
     const series = encodeURIComponent('["EQ"]');
     const path   = `/api/historical/cm/equity?symbol=${encodeURIComponent(symbol)}&series=${series}&from=${chunk.from}&to=${chunk.to}`;
     try {
@@ -237,7 +238,8 @@ async function fetchNSEDailyBars(symbol, days = 365) {
     } catch(e) {
       console.warn(`[NSE] history chunk ${chunk.from}–${chunk.to} for ${symbol}: ${e.message}`);
     }
-    await new Promise(r => setTimeout(r, 400)); // rate-limit between chunks
+    // Rate-limit BETWEEN chunks only — skip sleep after the last chunk
+    if (ci < chunks.length - 1) await new Promise(r => setTimeout(r, 400));
   }
 
   const bars = allBars
@@ -288,7 +290,7 @@ function httpsGet(url) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(12000, () => req.destroy(new Error('Timeout')));
+    req.setTimeout(8000, () => req.destroy(new Error('Timeout')));
     req.end();
   });
 }
@@ -1040,16 +1042,13 @@ const TF = {
       try {
         const bars = await fetchNSEDailyBars(sym, 10);
         if (bars.length >= 1) {
-          // Append today's live quote as the last bar (3-5 min delayed)
           try {
             const todayBar = await fetchNSEQuoteBar(sym);
-            // Only append if today's bar isn't already in history
             const lastHistTs = bars[bars.length - 1].time;
             const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
             if (lastHistTs < todayMidnight.getTime()) {
               bars.push(todayBar);
             } else {
-              // Update last bar's close/high/low with live data
               const last = bars[bars.length - 1];
               last.close  = todayBar.close;
               last.high   = Math.max(last.high, todayBar.high);
@@ -1944,7 +1943,7 @@ app.get('/api/screen/stream', async (req, res) => {
 
   let done = 0, matched = 0;
   const t0 = Date.now();
-  const BATCH = 15;
+  const BATCH = 30;
 
   for (let i = 0; i < symbols.length; i += BATCH) {
     if (res.writableEnded) break;
@@ -1960,7 +1959,6 @@ app.get('/api/screen/stream', async (req, res) => {
         continue;
       }
 
-      // Use quality-passed rules for match check if quality filter on
       const effectiveMatches = qualityFilter
         ? result.qualityPassedRules
         : result.matchedRules;
@@ -1977,7 +1975,7 @@ app.get('/api/screen/stream', async (req, res) => {
       }
     }
 
-    if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 30));
+    if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 5));
   }
 
   emit({ type: 'done', total: symbols.length, matched, elapsed: Date.now() - t0 });
