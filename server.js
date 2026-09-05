@@ -1704,7 +1704,11 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         mlDirection:  bestFeat.direction,   // 1=BUY rule, -1=SELL rule
       };
     } else {
-      mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5 };
+      // No quality-passed rules — derive direction from best matched rule
+      const fallbackDir = matchedRules.length > 0
+        ? getRuleDirection(matchedRules[0], cpr, cam, last.close, prevClose, periodHigh, periodLow)
+        : 0;
+      mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5, mlDirection: fallbackDir };
     }
 
     // ── Post-mlResult: confluence + ML-adaptive exit levels + best-rule (P1,P2,P3,P4) ──────
@@ -1850,6 +1854,29 @@ app.get('/api/bhav-debug', (req, res) => {
 });
 
 app.get('/api/symbols', (_req, res) => res.json(NSE_SYMBOLS));
+
+app.get('/api/mlstatus', (_req, res) => {
+  const fs2 = require('fs');
+  const MODELS_DIR2 = require('path').join(__dirname, 'models');
+  const modelFiles = [
+    'lgbm2c_global_js.json','lgbm2c_regime_0_js.json','lgbm2c_regime_1_js.json',
+    'lgbm2c_regime_2_js.json','lgbm2c_regime_3_js.json',
+    'ppo_policy_weights.json','hmm_params.json','conformal_scores.json','shap_gate_weights.json'
+  ];
+  const fileStatus = {};
+  for (const f of modelFiles) {
+    const fp = require('path').join(MODELS_DIR2, f);
+    try { fileStatus[f] = fs2.existsSync(fp) ? fs2.statSync(fp).size : 'MISSING'; }
+    catch(e) { fileStatus[f] = 'ERROR: ' + e.message; }
+  }
+  res.json({
+    regime:     mlEngine.getCurrentRegime(),
+    regimeState: mlEngine.getCurrentRegimeState(),
+    modelFiles: fileStatus,
+    modelsDir:  MODELS_DIR2,
+    __dirname,
+  });
+});
 
 app.get('/api/lists', (_req, res) => {
   const lists = LIST_CONFIG

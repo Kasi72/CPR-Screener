@@ -1643,7 +1643,7 @@ function computeRecommendation(stock) {
 
   // ── Priority 2: regime-graded multiplier (not binary gate) ───────────────
   const regime       = ml.regime || '';
-  const regimeMult   = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.7, 'Chop': 0.4, 'High-Vol-Panic': 0.0 }[regime] ?? 0.6;
+  const regimeMult   = { 'Bull-Trend': 1.0, 'Bear-Trend': 0.7, 'Chop': 0.4, 'High-Vol-Panic': 0.0 }[regime] ?? 1.0;
   const regimeAllowed = ml.regimeAllowed !== false;
   why.push(`Regime: ${regime || 'Unknown'} (×${regimeMult})`);
 
@@ -2273,7 +2273,7 @@ const App = {
           this.updateStats(msg.total, msg.matched, State.errors, elapsed);
           // Update regime badge from first result
           const firstML = State.results.length ? State.results[0].ml : null;
-          if (firstML && firstML.regime && firstML.regime !== 'Unknown') {
+          if (firstML && firstML.regime) {
             const REGIME_COLOR = {'Bull-Trend':'#4ade80','Bear-Trend':'#f87171','Chop':'#fb923c','High-Vol-Panic':'#a78bfa'};
             const REGIME_ICON  = {'Bull-Trend':'🐂','Bear-Trend':'🐻','Chop':'〰','High-Vol-Panic':'⚡'};
             const rb = $('regimeBadge');
@@ -2481,11 +2481,12 @@ const App = {
       <td style="text-align:center;font-size:11px">
         ${(() => {
           const ml = stock.ml;
-          if (!ml || !ml.regime || ml.regime === 'Unknown') return '<span style="color:var(--t4)">–</span>';
-          const REGIME_COLOR = {'Bull-Trend':'#4ade80','Bear-Trend':'#f87171','Chop':'#fb923c','High-Vol-Panic':'#a78bfa'};
+          if (!ml || !ml.regime) return '<span style="color:var(--t4)">–</span>';
+          const REGIME_COLOR = {'Bull-Trend':'#4ade80','Bear-Trend':'#f87171','Chop':'#fb923c','High-Vol-Panic':'#a78bfa','Unknown':'#6b7280'};
           const col  = REGIME_COLOR[ml.regime] || '#9ca3af';
-          const icon = {'Bull-Trend':'🐂','Bear-Trend':'🐻','Chop':'〰','High-Vol-Panic':'⚡'}[ml.regime] || '?';
-          return `<span style="color:${col};font-weight:600;white-space:nowrap" title="Regime score: ${ml.regimeScore}">${icon} ${ml.regime.replace('-',' ')}</span>`;
+          const icon = {'Bull-Trend':'🐂','Bear-Trend':'🐻','Chop':'〰','High-Vol-Panic':'⚡','Unknown':'?'}[ml.regime] || '?';
+          const label = ml.regime === 'Unknown' ? 'Unknown' : ml.regime.replace('-',' ');
+          return `<span style="color:${col};font-weight:600;white-space:nowrap" title="Regime score: ${ml.regimeScore}">${icon} ${label}</span>`;
         })()}
       </td>
       <td style="text-align:center;padding:6px 8px">${recBadgeHtml(_rec)}</td>
