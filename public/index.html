@@ -1406,9 +1406,14 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
   </div>
 
   <!-- Run -->
-  <button class="run-btn" id="runBtn" onclick="App.run()">
-    <span id="runBtnText">▶ Run Screener</span>
-  </button>
+  <div style="display:flex;gap:8px;align-items:stretch">
+    <button class="run-btn" id="runBtn" onclick="App.run()" style="flex:1">
+      <span id="runBtnText">▶ Run Screener</span>
+    </button>
+    <button class="run-btn" id="resumeBtn" onclick="App.resume()" style="flex:0 0 auto;display:none;background:linear-gradient(135deg,#1e3a5f,#1a4a7a);font-size:13px;padding:0 18px" title="Continue scan from where it stopped">
+      ↺ Resume
+    </button>
+  </div>
 
   <div style="font-size:10px; color:var(--t4); text-align:center; line-height:1.6;">
     Data via Yahoo Finance<br>
@@ -1521,7 +1526,8 @@ const State = {
   isRunning: false,
   scanned: 0,
   errors: 0,
-  rulesConfig: []
+  rulesConfig: [],
+  partial: null   // {offset, total, matched, params, t0} when scan stopped mid-way
 };
 
 // ─── RULE COLORS / CONFIG ─────────────────────────────────────────────────────
@@ -2193,6 +2199,8 @@ const App = {
     $('resultsTable').style.display = '';
     $('tableBody').innerHTML = '';
     $('refreshPricesBtn').style.display = 'none';
+    $('resumeBtn').style.display = 'none';
+    State.partial = null;
     $('progressWrap').style.display = '';
     $('progressFill').style.width = '0%';
     this.updateStats(0, 0, 0, 0);
@@ -2345,7 +2353,17 @@ const App = {
         runBtn.disabled = false;
         runText.textContent = '▶ Run Screener';
         $('progressWrap').style.display = 'none';
-        toast('Connection error — check server is running');
+        if (scannedSoFar > 0 && scannedSoFar < total) {
+          const resumeParams = new URLSearchParams(params);
+          resumeParams.set('offset', scannedSoFar);
+          State.partial = { offset: scannedSoFar, total, matched, params: resumeParams, t0 };
+          const rb = $('resumeBtn');
+          rb.style.display = '';
+          rb.textContent = `↺ Resume (${scannedSoFar}/${total})`;
+          toast(`Scan stopped at ${scannedSoFar} — click Resume to continue`);
+        } else {
+          toast('Connection error — check server is running');
+        }
       };
 
     } catch(err) {
@@ -2354,6 +2372,15 @@ const App = {
       runText.textContent = '▶ Run Screener';
       toast('Error: ' + err.message);
     }
+  },
+
+  // Public resume — called by Resume button; uses State.partial
+  resume() {
+    if (!State.partial) return;
+    const { offset, total, matched, params, t0 } = State.partial;
+    State.partial = null;
+    $('resumeBtn').style.display = 'none';
+    this._resume(params, offset, total, matched, t0);
   },
 
   // Resume a dropped SSE stream from a given offset, preserving existing results
@@ -2403,7 +2430,17 @@ const App = {
         runBtn.disabled = false;
         runText.textContent = '▶ Run Screener';
         $('progressWrap').style.display = 'none';
-        toast('Resume failed — connection lost');
+        if (done < total) {
+          const nextParams = new URLSearchParams(resumeParams);
+          nextParams.set('offset', done);
+          State.partial = { offset: done, total, matched, params: nextParams, t0 };
+          const rb = $('resumeBtn');
+          rb.style.display = '';
+          rb.textContent = `↺ Resume (${done}/${total})`;
+          toast(`Resume stopped at ${done} — click Resume to continue`);
+        } else {
+          toast('Resume failed — connection lost');
+        }
       };
     } catch(err) {
       State.isRunning = false;
