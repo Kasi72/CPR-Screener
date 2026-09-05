@@ -2210,7 +2210,7 @@ const App = {
 
     try {
       const sse = new EventSource(`/api/screen/stream?${params}`);
-      let total = 0;
+      let total = 0, matched = 0;
       const t0 = Date.now();
 
       sse.onmessage = (e) => {
@@ -2240,6 +2240,7 @@ const App = {
 
         if (msg.type === 'tick') {
           State.scanned = msg.done;
+          if (msg.matched !== undefined) matched = msg.matched;
           if (msg.result) {
             State.results.push(msg.result);
             this.appendRow(msg.result);
@@ -2307,12 +2308,25 @@ const App = {
         try {
           const probe = await fetch(`/api/screen/stream?${params}`, { method: 'HEAD' });
           if (probe.status === 503) {
-            toast('Server warming up — retrying in 5s…');
+            // Keep button locked + show countdown so user sees activity
+            runBtn.disabled = true;
+            runText.textContent = '⏳ Warming up…';
+            $('progressText').textContent = 'Server warming up — retrying in 5s…';
+            $('progressWrap').style.display = '';
+            let secs = 5;
+            const cd = setInterval(() => {
+              secs--;
+              if (secs > 0) $('progressText').textContent = `Server warming up — retrying in ${secs}s…`;
+            }, 1000);
             State.isRunning = false;
-            runBtn.disabled = false;
-            runText.textContent = '▶ Run Screener';
-            $('progressWrap').style.display = 'none';
-            setTimeout(() => this.run(), 5000);
+            if (scannedSoFar > 0 && scannedSoFar < total) {
+              // Partial scan already done — resume from offset, don't clear results
+              const resumeParams = new URLSearchParams(params);
+              resumeParams.set('offset', scannedSoFar);
+              setTimeout(() => { clearInterval(cd); this._resume(resumeParams, scannedSoFar, total, matched, t0); }, 5000);
+            } else {
+              setTimeout(() => { clearInterval(cd); this.run(); }, 5000);
+            }
             return;
           }
         } catch(_) {}
@@ -2730,6 +2744,7 @@ const App = {
     toast('CSV exported');
   }
 };
+window.App = App;
 
 // ─── EVENT BINDINGS ───────────────────────────────────────────────────────────
 
@@ -2985,6 +3000,7 @@ const Train = (() => {
 
   return { open, close, start, cancel, isRunning };
 })();
+window.Train = Train;
 
 // Load empirical rec weights on page start (non-blocking)
 loadRecWeights();
