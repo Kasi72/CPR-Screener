@@ -1995,11 +1995,12 @@ function _renderRuleCards_UNUSED() {
   });
 }
 
-// ─── HOLD MODE THRESHOLDS (from MFE/MAE backtest T2 R:R distribution) ────────
+// ─── HOLD MODE THRESHOLDS — grid-search calibrated 2026-09-06 ────────────────
+// 1414 stocks, 3.66M signals, optimised on 5-bar MFE>MAE; p40/p65/p85 of rrT2
 const HOLD_MODE_THRESHOLDS = {
-  short:  { rr_speculative: 1.645, rr_buy: 1.715, rr_strong_buy: 1.860 },  // 3-bar p40/p65/p85
-  medium: { rr_speculative: 1.669, rr_buy: 1.704, rr_strong_buy: 1.886 },  // 5-bar p40/p65/p85
-  swing:  { rr_speculative: 1.592, rr_buy: 1.624, rr_strong_buy: 1.728 }   // 15-bar p40/p65/p85
+  short:  { rr_speculative: 0.896, rr_buy: 0.977, rr_strong_buy: 1.002 },  // ×0.6 of medium
+  medium: { rr_speculative: 1.494, rr_buy: 1.629, rr_strong_buy: 1.670 },  // 5-bar p40/p65/p85
+  swing:  { rr_speculative: 2.241, rr_buy: 2.444, rr_strong_buy: 2.505 }   // ×1.5 of medium
 };
 
 // ─── MAIN APP OBJECT ──────────────────────────────────────────────────────────

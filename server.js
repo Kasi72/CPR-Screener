@@ -597,48 +597,49 @@ const REGIME_GATES = {
   'High-Vol-Panic': { adx: 30, atrPct: [0.70, 1.20], volRatio: 1.40, vix: 16 },
 };
 
-// Hold-duration calibrated MFE/MAE params (backtest on 1414 NSE stocks)
-// short = 3-bar (≈3 days), medium = 5-bar (≈1 week), swing = 15-bar (≈3 weeks)
-// rule8 skipped (requires intraday opening-range bars); retained at prior values in all modes
+// Hold-duration calibrated MFE/MAE params — grid-searched 2026-09-06
+// 1414 NSE stocks, 3.66M signals, 5-bar MFE>MAE optimisation (medium mode baseline)
+// short = 3-bar (×0.44 of medium), medium = 5-bar grid-search result, swing = 15-bar (×1.82)
+// rule8 skipped (intraday opening-range); retained at prior values
 const MFE_MAE_PARAMS_ALL = {
   short: {
-    rule1:  { optTargetPct: 5.247, optStopPct: 3.152 },
-    rule2:  { optTargetPct: 4.691, optStopPct: 2.716 },
-    rule3:  { optTargetPct: 5.638, optStopPct: 2.840 },
-    rule4:  { optTargetPct: 5.934, optStopPct: 3.072 },
-    rule5:  { optTargetPct: 4.841, optStopPct: 2.995 },
-    rule6:  { optTargetPct: 5.200, optStopPct: 3.260 },
-    rule7:  { optTargetPct: 4.298, optStopPct: 2.782 },
+    rule1:  { optTargetPct: 3.364, optStopPct: 2.251 },
+    rule2:  { optTargetPct: 2.529, optStopPct: 1.539 },
+    rule3:  { optTargetPct: 3.091, optStopPct: 1.836 },
+    rule4:  { optTargetPct: 3.319, optStopPct: 2.137 },
+    rule5:  { optTargetPct: 3.095, optStopPct: 1.715 },
+    rule6:  { optTargetPct: 2.821, optStopPct: 1.889 },
+    rule7:  { optTargetPct: 2.656, optStopPct: 1.614 },
     rule8:  { optTargetPct: 2.671, optStopPct: 4.138 },
-    rule9:  { optTargetPct: 5.794, optStopPct: 3.827 },
-    rule10: { optTargetPct: 4.608, optStopPct: 2.675 },
-    rule11: { optTargetPct: 5.007, optStopPct: 2.999 }
+    rule9:  { optTargetPct: 2.578, optStopPct: 1.963 },
+    rule10: { optTargetPct: 2.246, optStopPct: 1.514 },
+    rule11: { optTargetPct: 2.386, optStopPct: 1.633 }
   },
   medium: {
-    rule1:  { optTargetPct: 6.891, optStopPct: 4.098 },
-    rule2:  { optTargetPct: 6.135, optStopPct: 3.584 },
-    rule3:  { optTargetPct: 7.414, optStopPct: 3.739 },
-    rule4:  { optTargetPct: 7.948, optStopPct: 4.016 },
-    rule5:  { optTargetPct: 6.365, optStopPct: 3.857 },
-    rule6:  { optTargetPct: 6.842, optStopPct: 4.244 },
-    rule7:  { optTargetPct: 5.700, optStopPct: 3.645 },
+    rule1:  { optTargetPct: 7.645, optStopPct: 5.115 },
+    rule2:  { optTargetPct: 5.748, optStopPct: 3.498 },
+    rule3:  { optTargetPct: 7.024, optStopPct: 4.173 },
+    rule4:  { optTargetPct: 7.543, optStopPct: 4.857 },
+    rule5:  { optTargetPct: 7.034, optStopPct: 3.897 },
+    rule6:  { optTargetPct: 6.411, optStopPct: 4.293 },
+    rule7:  { optTargetPct: 6.036, optStopPct: 3.669 },
     rule8:  { optTargetPct: 2.671, optStopPct: 4.138 },
-    rule9:  { optTargetPct: 7.588, optStopPct: 4.860 },
-    rule10: { optTargetPct: 6.022, optStopPct: 3.528 },
-    rule11: { optTargetPct: 6.600, optStopPct: 3.912 }
+    rule9:  { optTargetPct: 5.860, optStopPct: 4.461 },
+    rule10: { optTargetPct: 5.105, optStopPct: 3.442 },
+    rule11: { optTargetPct: 5.423, optStopPct: 3.711 }
   },
   swing: {
-    rule1:  { optTargetPct: 11.876, optStopPct: 7.535 },
-    rule2:  { optTargetPct: 10.897, optStopPct: 6.697 },
-    rule3:  { optTargetPct: 13.456, optStopPct: 6.819 },
-    rule4:  { optTargetPct: 13.284, optStopPct: 7.452 },
-    rule5:  { optTargetPct: 11.233, optStopPct: 7.094 },
-    rule6:  { optTargetPct: 12.198, optStopPct: 7.635 },
-    rule7:  { optTargetPct: 10.286, optStopPct: 6.805 },
-    rule8:  { optTargetPct:  2.671, optStopPct: 4.138 },
-    rule9:  { optTargetPct: 13.405, optStopPct: 8.285 },
-    rule10: { optTargetPct: 10.732, optStopPct: 6.605 },
-    rule11: { optTargetPct: 11.556, optStopPct: 7.294 }
+    rule1:  { optTargetPct: 13.914, optStopPct:  9.309 },
+    rule2:  { optTargetPct: 10.461, optStopPct:  6.367 },
+    rule3:  { optTargetPct: 12.784, optStopPct:  7.595 },
+    rule4:  { optTargetPct: 13.728, optStopPct:  8.839 },
+    rule5:  { optTargetPct: 12.802, optStopPct:  7.093 },
+    rule6:  { optTargetPct: 11.668, optStopPct:  7.813 },
+    rule7:  { optTargetPct: 10.985, optStopPct:  6.677 },
+    rule8:  { optTargetPct:  2.671, optStopPct:  4.138 },
+    rule9:  { optTargetPct: 10.665, optStopPct:  8.119 },
+    rule10: { optTargetPct:  9.291, optStopPct:  6.264 },
+    rule11: { optTargetPct:  9.870, optStopPct:  6.754 }
   }
 };
 // Default (swing) — used when holdMode not specified
