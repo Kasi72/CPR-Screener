@@ -803,6 +803,8 @@ aside {
 }
 
 .spacer { flex: 1; min-width: 8px; }
+.filter-chip.high-yield-chip { border-color: rgba(251,191,36,0.5); color: #f59e0b; }
+.filter-chip.high-yield-chip.active { background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.7); color: #fbbf24; }
 
 .export-btn {
   padding: 6px 14px;
@@ -1475,6 +1477,7 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
       <input type="text" id="searchInput" placeholder="Search symbol…" oninput="App.filter()">
     </div>
     <button class="filter-chip active" data-rule="all" onclick="App.toggleRuleFilter(this)">All</button>
+    <button class="filter-chip high-yield-chip" data-rule="high-yield" onclick="App.toggleRuleFilter(this)" title="rule4 or rule11 + conf≥62 + Bull-Trend + ≥2 rules — highest precision signals from backtest">⚡ High Yield</button>
     <div id="filterChips" style="display:contents"></div>
     <button id="clearAllFiltersBtn" class="clear-filters-btn" onclick="App.clearAllColFilters()" style="display:none">✕ Clear Filters</button>
     <div class="spacer"></div>
@@ -2681,7 +2684,14 @@ const App = {
     }
 
     // Rule filter
-    if (State.ruleFilter !== 'all') {
+    if (State.ruleFilter === 'high-yield') {
+      data = data.filter(s =>
+        (s.matchedRules.includes('rule4') || s.matchedRules.includes('rule11')) &&
+        (s.rec && s.rec.confidence >= 62) &&
+        (s.ml && s.ml.regime === 'Bull-Trend') &&
+        (s.matchCount >= 2)
+      );
+    } else if (State.ruleFilter !== 'all') {
       data = data.filter(s => s.matchedRules.includes(State.ruleFilter));
     }
 
