@@ -597,21 +597,52 @@ const REGIME_GATES = {
   'High-Vol-Panic': { adx: 30, atrPct: [0.70, 1.20], volRatio: 1.40, vix: 16 },
 };
 
-// Per-rule optimal exit params — MFE/MAE 75th/55th pct backtest on 1414 NSE stocks (15-bar lookahead)
-// rule8 skipped (requires intraday opening-range bars); kept at prior values
-const MFE_MAE_PARAMS = {
-  rule1:  { optTargetPct: 11.876, optStopPct: 7.535 },
-  rule2:  { optTargetPct: 10.897, optStopPct: 6.697 },
-  rule3:  { optTargetPct: 13.456, optStopPct: 6.819 },
-  rule4:  { optTargetPct: 13.284, optStopPct: 7.452 },
-  rule5:  { optTargetPct: 11.233, optStopPct: 7.094 },
-  rule6:  { optTargetPct: 12.198, optStopPct: 7.635 },
-  rule7:  { optTargetPct: 10.286, optStopPct: 6.805 },
-  rule8:  { optTargetPct:  2.671, optStopPct: 4.138 },   // intraday rule — prior value retained
-  rule9:  { optTargetPct: 13.405, optStopPct: 8.285 },
-  rule10: { optTargetPct: 10.732, optStopPct: 6.605 },
-  rule11: { optTargetPct: 11.556, optStopPct: 7.294 }
+// Hold-duration calibrated MFE/MAE params (backtest on 1414 NSE stocks)
+// short = 3-bar (≈3 days), medium = 5-bar (≈1 week), swing = 15-bar (≈3 weeks)
+// rule8 skipped (requires intraday opening-range bars); retained at prior values in all modes
+const MFE_MAE_PARAMS_ALL = {
+  short: {
+    rule1:  { optTargetPct: 5.247, optStopPct: 3.152 },
+    rule2:  { optTargetPct: 4.691, optStopPct: 2.716 },
+    rule3:  { optTargetPct: 5.638, optStopPct: 2.840 },
+    rule4:  { optTargetPct: 5.934, optStopPct: 3.072 },
+    rule5:  { optTargetPct: 4.841, optStopPct: 2.995 },
+    rule6:  { optTargetPct: 5.200, optStopPct: 3.260 },
+    rule7:  { optTargetPct: 4.298, optStopPct: 2.782 },
+    rule8:  { optTargetPct: 2.671, optStopPct: 4.138 },
+    rule9:  { optTargetPct: 5.794, optStopPct: 3.827 },
+    rule10: { optTargetPct: 4.608, optStopPct: 2.675 },
+    rule11: { optTargetPct: 5.007, optStopPct: 2.999 }
+  },
+  medium: {
+    rule1:  { optTargetPct: 6.891, optStopPct: 4.098 },
+    rule2:  { optTargetPct: 6.135, optStopPct: 3.584 },
+    rule3:  { optTargetPct: 7.414, optStopPct: 3.739 },
+    rule4:  { optTargetPct: 7.948, optStopPct: 4.016 },
+    rule5:  { optTargetPct: 6.365, optStopPct: 3.857 },
+    rule6:  { optTargetPct: 6.842, optStopPct: 4.244 },
+    rule7:  { optTargetPct: 5.700, optStopPct: 3.645 },
+    rule8:  { optTargetPct: 2.671, optStopPct: 4.138 },
+    rule9:  { optTargetPct: 7.588, optStopPct: 4.860 },
+    rule10: { optTargetPct: 6.022, optStopPct: 3.528 },
+    rule11: { optTargetPct: 6.600, optStopPct: 3.912 }
+  },
+  swing: {
+    rule1:  { optTargetPct: 11.876, optStopPct: 7.535 },
+    rule2:  { optTargetPct: 10.897, optStopPct: 6.697 },
+    rule3:  { optTargetPct: 13.456, optStopPct: 6.819 },
+    rule4:  { optTargetPct: 13.284, optStopPct: 7.452 },
+    rule5:  { optTargetPct: 11.233, optStopPct: 7.094 },
+    rule6:  { optTargetPct: 12.198, optStopPct: 7.635 },
+    rule7:  { optTargetPct: 10.286, optStopPct: 6.805 },
+    rule8:  { optTargetPct:  2.671, optStopPct: 4.138 },
+    rule9:  { optTargetPct: 13.405, optStopPct: 8.285 },
+    rule10: { optTargetPct: 10.732, optStopPct: 6.605 },
+    rule11: { optTargetPct: 11.556, optStopPct: 7.294 }
+  }
 };
+// Default (swing) — used when holdMode not specified
+const MFE_MAE_PARAMS = MFE_MAE_PARAMS_ALL['swing'];
 
 // ─── XGB PREDICTION CLIENT ────────────────────────────────────────────────────
 
@@ -1313,7 +1344,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       if (allPass) {
         qualityPassedRules.push(rid);
         // Store base MFE/MAE params + direction; ML scaling applied after mlResult is ready
-        const ep = MFE_MAE_PARAMS[rid] || { optTargetPct: 2.5, optStopPct: 3.5 };
+        const ep = (opts.mfeMaeParams || MFE_MAE_PARAMS)[rid] || { optTargetPct: 2.5, optStopPct: 3.5 };
         exitLevelsByRule[rid] = {
           direction,
           entry:      +last.close.toFixed(2),
@@ -1935,6 +1966,9 @@ app.get('/api/screen/stream', async (req, res) => {
   const symStr   = req.query.symbols;
   const qualityFilter  = req.query.quality !== 'false';
   const disabledGates  = (req.query.disabledGates || '').split(',').filter(Boolean);
+  const holdModeRaw    = req.query.holdMode || 'swing';
+  const holdMode       = MFE_MAE_PARAMS_ALL[holdModeRaw] ? holdModeRaw : 'swing';
+  const activeMfeMae   = MFE_MAE_PARAMS_ALL[holdMode];
 
   let symbols;
   if (listName && STOCK_LISTS[listName]) {
@@ -1970,7 +2004,7 @@ app.get('/api/screen/stream', async (req, res) => {
     if (res.writableEnded) break;
     const batch   = symbols.slice(i, i + BATCH);
     const results = await Promise.all(
-      batch.map(s => processSymbol(s, tf, rules, { narrowThreshold: narrow, disabledGates }))
+      batch.map(s => processSymbol(s, tf, rules, { narrowThreshold: narrow, disabledGates, mfeMaeParams: activeMfeMae }))
     );
 
     for (const result of results) {
