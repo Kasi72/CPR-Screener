@@ -597,19 +597,20 @@ const REGIME_GATES = {
   'High-Vol-Panic': { adx: 30, atrPct: [0.70, 1.20], volRatio: 1.40, vix: 16 },
 };
 
-// Per-rule optimal exit params from MFE/MAE 85th/60th pct backtest
+// Per-rule optimal exit params — MFE/MAE 75th/55th pct backtest on 1414 NSE stocks (15-bar lookahead)
+// rule8 skipped (requires intraday opening-range bars); kept at prior values
 const MFE_MAE_PARAMS = {
-  rule1:  { optTargetPct: 2.687, optStopPct: 4.037 },
-  rule2:  { optTargetPct: 2.525, optStopPct: 3.744 },
-  rule3:  { optTargetPct: 2.537, optStopPct: 3.786 },
-  rule4:  { optTargetPct: 2.500, optStopPct: 3.500 },
-  rule5:  { optTargetPct: 2.609, optStopPct: 3.978 },
-  rule6:  { optTargetPct: 3.033, optStopPct: 4.659 },
-  rule7:  { optTargetPct: 2.526, optStopPct: 3.281 },
-  rule8:  { optTargetPct: 2.671, optStopPct: 4.138 },
-  rule9:  { optTargetPct: 2.000, optStopPct: 2.500 },
-  rule10: { optTargetPct: 2.404, optStopPct: 3.174 },
-  rule11: { optTargetPct: 2.767, optStopPct: 3.929 }
+  rule1:  { optTargetPct: 11.876, optStopPct: 7.535 },
+  rule2:  { optTargetPct: 10.897, optStopPct: 6.697 },
+  rule3:  { optTargetPct: 13.456, optStopPct: 6.819 },
+  rule4:  { optTargetPct: 13.284, optStopPct: 7.452 },
+  rule5:  { optTargetPct: 11.233, optStopPct: 7.094 },
+  rule6:  { optTargetPct: 12.198, optStopPct: 7.635 },
+  rule7:  { optTargetPct: 10.286, optStopPct: 6.805 },
+  rule8:  { optTargetPct:  2.671, optStopPct: 4.138 },   // intraday rule — prior value retained
+  rule9:  { optTargetPct: 13.405, optStopPct: 8.285 },
+  rule10: { optTargetPct: 10.732, optStopPct: 6.605 },
+  rule11: { optTargetPct: 11.556, optStopPct: 7.294 }
 };
 
 // ─── XGB PREDICTION CLIENT ────────────────────────────────────────────────────

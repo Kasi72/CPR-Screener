@@ -1680,16 +1680,17 @@ function computeRecommendation(stock) {
     why.push('Exits: CPR/Cam geometry (no server ML exits)');
   }
 
-  const reward = Math.abs((t1||entry) - entry);
+  const reward = Math.abs((t2||t1||entry) - entry);   // T2 (full target) for R:R — calibrated 2026-09-06
   const risk   = Math.abs((sl||entry) - entry);
   const rr     = risk > 0 ? reward / risk : 0;
 
   // ── Tier: lgbm2c confidence × regime multiplier; Priority 5: confluencePass gates STRONG BUY ──
+  // Thresholds from MFE/MAE backtest T2 R:R distribution (p40/p65/p85) on 1414 NSE stocks
   const adjConf = conf * regimeMult;
   let tier;
-  if      (adjConf >= 62 && rr >= 2.0 && stock.confluencePass && regimeAllowed) tier = 'STRONG BUY';
-  else if (adjConf >= 50 && rr >= 1.5 && regimeAllowed)                         tier = 'BUY';
-  else if (adjConf >= 38 && rr >= 1.2)                                           tier = 'SPECULATIVE';
+  if      (adjConf >= 62 && rr >= 1.728 && stock.confluencePass && regimeAllowed) tier = 'STRONG BUY';
+  else if (adjConf >= 50 && rr >= 1.624 && regimeAllowed)                         tier = 'BUY';
+  else if (adjConf >= 38 && rr >= 1.592)                                           tier = 'SPECULATIVE';
   else if (adjConf >= 38)                                                        tier = 'WATCH';
   else                                                                           tier = 'AVOID';
 
