@@ -2703,7 +2703,7 @@ const App = {
         if (!live) continue;
         const prevClose = stock.prevClose || stock.price;
         stock.price  = live.price;
-        stock.change = +((live.price - prevClose) / prevClose * 100).toFixed(2);
+        stock.change = prevClose > 0 ? +((live.price - prevClose) / prevClose * 100).toFixed(2) : 0;
         stock.pricePosition = live.price > stock.cpr.upper ? 'above'
                             : live.price < stock.cpr.lower ? 'below' : 'inside';
         // Update DOM in-place

@@ -148,7 +148,7 @@ function gaussianLogLikelihood(means, covars, obs) {
   let ll = 0;
   for (let i = 0; i < means.length; i++) {
     const d    = obs[i] - means[i];
-    const var_ = covars[i];
+    const var_ = covars[i] > 0 ? covars[i] : 1e-10;
     ll += -0.5 * (Math.log(2 * Math.PI * var_) + d * d / var_);
   }
   return ll;
@@ -209,9 +209,9 @@ function computeRegime(niftyBars) {
 
   const obsMatrix = [];
   for (let i = 20; i < bars.length; i++) {
-    const ret      = closes[i] / closes[i-1] - 1;
+    const ret      = closes[i-1] > 0 ? closes[i] / closes[i-1] - 1 : 0;
     const retSlice = [];
-    for (let k = Math.max(1, i - 19); k <= i; k++) retSlice.push(closes[k] / closes[k-1] - 1);
+    for (let k = Math.max(1, i - 19); k <= i; k++) retSlice.push(closes[k-1] > 0 ? closes[k] / closes[k-1] - 1 : 0);
     const vol20      = stdDev(retSlice);
     const trend      = (e50s[i] - e200s[i]) / (e200s[i] || 1);
     const vol20avg   = mean(vols.slice(i-20, i));

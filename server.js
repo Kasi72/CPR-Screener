@@ -1071,11 +1071,15 @@ const TF = {
     label: '1 Week', tvInterval: 'W',
     getPrev: async (sym) => {
       // Yahoo '1wk' bars are already weekly aggregates — bars[-1] is current week,
-      // bars[-2] is the previous complete week whose H/L/C defines weekly CPR
+      // bars[-2] is the previous complete week whose H/L/C defines weekly CPR.
+      // Skip bars with high==low (circuit weeks) to avoid degenerate CPR.
       const d = await fetchYahoo(sym, '1wk', '1y');
       const bars = extractBars(d);
-      if (bars.length < 2) return bars[bars.length - 1] || bars[0];
-      return bars[bars.length - 2];
+      // Walk backwards: skip last bar (current incomplete week) + skip circuit bars
+      for (let i = bars.length - 2; i >= 0; i--) {
+        if (bars[i].high > bars[i].low) return bars[i];
+      }
+      return bars[bars.length - 2] || bars[bars.length - 1];
     },
     getCurrent: async (sym) => {
       const d = await fetchYahoo(sym, '1wk', '6mo');
@@ -1086,11 +1090,14 @@ const TF = {
     label: '1 Month', tvInterval: 'M',
     getPrev: async (sym) => {
       // Yahoo '1mo' bars are monthly aggregates — bars[-1] is current (incomplete) month,
-      // bars[-2] is previous complete month whose H/L/C defines monthly CPR
+      // bars[-2] is previous complete month whose H/L/C defines monthly CPR.
+      // Skip bars with high==low (circuit months) to avoid degenerate CPR.
       const d = await fetchYahoo(sym, '1mo', '3y');
       const bars = extractBars(d);
-      if (bars.length < 2) return bars[bars.length - 1] || bars[0];
-      return bars[bars.length - 2];
+      for (let i = bars.length - 2; i >= 0; i--) {
+        if (bars[i].high > bars[i].low) return bars[i];
+      }
+      return bars[bars.length - 2] || bars[bars.length - 1];
     },
     getCurrent: async (sym) => {
       const d = await fetchYahoo(sym, '1mo', '2y');
@@ -1149,7 +1156,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     const periodHigh = Math.max(...currentBars.map(b => b.high));
     const periodLow  = Math.min(...currentBars.map(b => b.low));
     const prevClose  = prev2?.close ?? prevPeriod.close;
-    const change     = +((last.close - prevClose) / prevClose * 100).toFixed(2);
+    const change     = prevClose > 0 ? +((last.close - prevClose) / prevClose * 100).toFixed(2) : 0;
 
     // ── Quality gate computation ───────────────────────────────────────────────
     const histBars = histData
