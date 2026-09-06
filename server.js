@@ -1006,35 +1006,39 @@ const TF = {
   '1d': {
     label: '1 Day', tvInterval: 'D',
     getPrev: async (sym) => {
-      // Priority 1: bhav copy OHLCV cache — loaded once for ALL symbols, zero per-stock cost
-      if (bhavPrevMap[sym]) return bhavPrevMap[sym];
-      // Priority 2: Yahoo Finance (1 request, fast)
-      try {
-        const d = await fetchYahoo(sym, '1d', '5d');
-        const bars = extractBars(d);
-        if (bars.length >= 1) {
-          const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-          const lastTs = bars[bars.length - 1].time;
-          if (lastTs >= todayMidnight.getTime()) {
-            if (bars.length >= 2) return bars[bars.length - 2];
-          } else {
-            return bars[bars.length - 1];
-          }
+      // Helper: pick best prev bar from a bars array (skip today; skip circuit bars H==L)
+      const pickPrev = (bars) => {
+        const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+        // walk backwards, skipping today's bar and circuit bars
+        for (let i = bars.length - 1; i >= 0; i--) {
+          const b = bars[i];
+          if (b.time >= todayMidnight.getTime()) continue; // skip today
+          if (b.high > b.low) return b; // valid range bar
         }
+        // fallback: any bar that isn't today
+        for (let i = bars.length - 1; i >= 0; i--) {
+          if (bars[i].time < todayMidnight.getTime()) return bars[i];
+        }
+        return null;
+      };
+      // Priority 1: bhav copy OHLCV cache — skip circuit (H==L) so CPR isn't degenerate
+      const bh = bhavPrevMap[sym];
+      if (bh && bh.high > bh.low) return bh;
+      // Priority 2: Yahoo Finance — fetch 10d so we can skip multiple circuit days
+      try {
+        const d = await fetchYahoo(sym, '1d', '10d');
+        const bars = extractBars(d);
+        const p = pickPrev(bars);
+        if (p) return p;
       } catch(e) {}
-      // Priority 3: NSE API (authoritative but slow — fallback only)
+      // Priority 3: NSE API
       try {
         const bars = await fetchNSEDailyBars(sym, 10);
-        if (bars.length >= 1) {
-          const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
-          const lastTs = bars[bars.length - 1].time;
-          if (lastTs >= todayMidnight.getTime()) {
-            if (bars.length >= 2) return bars[bars.length - 2];
-          } else {
-            return bars[bars.length - 1];
-          }
-        }
+        const p = pickPrev(bars);
+        if (p) return p;
       } catch(e) {}
+      // Last resort: bhav even if circuit (better than nothing)
+      if (bh) return bh;
       throw new Error(`getPrev failed for ${sym}`);
     },
     getCurrent: async (sym) => {
@@ -1767,7 +1771,10 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
     mlResult.positionLabel = posLabel[Math.min(posIdx, 4)];
 
     const p = v => +v.toFixed(2);
-    const pPos = last.close > cpr.upper ? 'above' : last.close < cpr.lower ? 'below' : 'inside';
+    // Degenerate CPR (circuit day: high==low → upper==lower==pivot): use price vs pivot
+    const pPos = (cpr.upper === cpr.lower)
+      ? (last.close > cpr.pivot ? 'above' : last.close < cpr.pivot ? 'below' : 'inside')
+      : (last.close > cpr.upper ? 'above' : last.close < cpr.lower ? 'below' : 'inside');
 
     return {
       symbol,
