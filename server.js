@@ -2059,7 +2059,10 @@ app.get('/api/screen/stream', async (req, res) => {
 
 const { spawn } = require('child_process');
 
-const PYTHON      = process.env.PYTHON_PATH || 'python3';
+const PYTHON      = process.env.PYTHON_PATH ||
+  (process.platform === 'win32'
+    ? 'C:\\Users\\drkkr\\AppData\\Local\\Programs\\Python\\Python310\\python.exe'
+    : 'python3');
 const RUN_ALL     = path.join(__dirname, 'scripts', 'ml', 'run_all.py');
 const LAST_RUN_F  = path.join(__dirname, 'auto_retrain_cpr.last_run');
 
@@ -2086,7 +2089,10 @@ app.post('/api/train/start', (req, res) => {
 
   proc.on('error', err => {
     trainJob.status = 'failed';
-    trainJob.log.push(`spawn error: ${err.message}`);
+    const msg = err.code === 'ENOENT'
+      ? `Python not found at "${PYTHON}". Set the PYTHON_PATH environment variable to your Python executable path and redeploy.`
+      : `spawn error: ${err.message}`;
+    trainJob.log.push(msg);
     trainJob.proc = null;
   });
 
