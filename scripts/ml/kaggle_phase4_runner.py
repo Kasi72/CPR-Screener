@@ -59,14 +59,12 @@ def upload_dataset():
         print(f"    Copying signal_dataset.csv ({size_mb:.0f} MB) ...")
         shutil.copy2(SIGNAL_CSV, os.path.join(staging, 'signal_dataset.csv'))
 
-        r = _kaggle('datasets', 'list', '--search', 'cpr-screener-phase4-inputs',
-                    '--user', 'drkasi', capture=True)
-        exists = 'cpr-screener-phase4-inputs' in (r.stdout or '')
-
-        if exists:
+        try:
             _kaggle('datasets', 'version', '-p', staging,
                     '-m', f'Phase4 signal_dataset {time.strftime("%Y-%m-%d %H:%M")}')
-        else:
+            print('    Dataset version created.')
+        except RuntimeError:
+            print('    Dataset not found — creating new dataset ...')
             _kaggle('datasets', 'create', '-p', staging)
 
         print("    Upload submitted. Polling until dataset ready ...")
