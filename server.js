@@ -302,7 +302,8 @@ async function fetchYahoo(symbol, interval, range) {
   if (cached) return cached;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}?interval=${interval}&range=${range}&includePrePost=false`;
   const body = await httpsGet(url);
-  const data = JSON.parse(body);
+  let data;
+  try { data = JSON.parse(body); } catch (e) { throw new Error(`Yahoo JSON parse (${symbol}): ${e.message}`); }
   if (data.chart?.error) throw new Error(data.chart.error.description || 'Yahoo error');
   toCache(key, data);
   return data;
@@ -316,7 +317,8 @@ async function fetchYahooIndex(symbol, interval, range) {
   if (cached) return cached;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
   const body = await httpsGet(url);
-  const data = JSON.parse(body);
+  let data;
+  try { data = JSON.parse(body); } catch (e) { throw new Error(`Yahoo JSON parse (${symbol}): ${e.message}`); }
   if (data.chart?.error) throw new Error(data.chart.error.description || 'Yahoo error');
   toCache(key, data);
   return data;
@@ -568,7 +570,7 @@ _startupPromise = Promise.all([
       } catch (e) {
         console.warn('  ML Regime refresh skipped:', e.message);
       }
-    });
+    }).catch(e => console.warn('loadIndexData refresh failed:', e.message));
     loadBhavCopy().catch(() => {});
     loadPCR().catch(() => {});
   }, 6 * 60 * 60 * 1000);
@@ -664,7 +666,7 @@ let xgbAvailable = false;
 
 (async () => {
   try {
-    const r = await fetch('http://127.0.0.1:5001/health');
+    const r = await fetch('http://127.0.0.1:5001/health', { signal: AbortSignal.timeout(3000) });
     if (r.ok) { xgbAvailable = true; console.log('  XGBoost server: connected'); }
   } catch { console.log('  XGBoost server: not running (predictions disabled)'); }
 })();
@@ -1124,6 +1126,7 @@ const TF = {
       for (let i = bars.length - 2; i >= 0; i--) {
         if (bars[i].high > bars[i].low) return bars[i];
       }
+      if (!bars.length) throw new Error(`No weekly bars for ${sym}`);
       return bars[bars.length - 2] || bars[bars.length - 1];
     },
     getCurrent: async (sym) => {
@@ -1142,6 +1145,7 @@ const TF = {
       for (let i = bars.length - 2; i >= 0; i--) {
         if (bars[i].high > bars[i].low) return bars[i];
       }
+      if (!bars.length) throw new Error(`No monthly bars for ${sym}`);
       return bars[bars.length - 2] || bars[bars.length - 1];
     },
     getCurrent: async (sym) => {
@@ -1959,6 +1963,9 @@ app.get('/api/screen/stream', async (req, res) => {
   // On serverless cold start, wait for startup data before proceeding
   if (!_serverReady) await _startupPromise;
 
+  let clientGone = false;
+  req.on('close', () => { clientGone = true; });
+
   res.writeHead(200, {
     'Content-Type':  'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -2012,7 +2019,7 @@ app.get('/api/screen/stream', async (req, res) => {
   const BATCH = 30;
 
   for (let i = 0; i < symbols.length; i += BATCH) {
-    if (res.writableEnded) break;
+    if (clientGone || res.writableEnded) break;
     const batch   = symbols.slice(i, i + BATCH);
     const results = await Promise.all(
       batch.map(s => processSymbol(s, tf, rules, { narrowThreshold: narrow, disabledGates, mfeMaeParams: activeMfeMae }))
@@ -2052,7 +2059,7 @@ app.get('/api/screen/stream', async (req, res) => {
 
 const { spawn } = require('child_process');
 
-const PYTHON      = 'C:\\Users\\drkkr\\AppData\\Local\\Programs\\Python\\Python310\\python.exe';
+const PYTHON      = process.env.PYTHON_PATH || 'python3';
 const RUN_ALL     = path.join(__dirname, 'scripts', 'ml', 'run_all.py');
 const LAST_RUN_F  = path.join(__dirname, 'auto_retrain_cpr.last_run');
 
@@ -2076,6 +2083,12 @@ app.post('/api/train/start', (req, res) => {
   const proc = spawn(PYTHON, args, { cwd: __dirname });
   trainJob.proc = proc;
   trainJob.status = 'running';
+
+  proc.on('error', err => {
+    trainJob.status = 'failed';
+    trainJob.log.push(`spawn error: ${err.message}`);
+    trainJob.proc = null;
+  });
 
   const pushLine = chunk => {
     chunk.toString().split(/\r?\n/).forEach(line => {
@@ -2135,7 +2148,7 @@ app.get('/api/train/stream', (req, res) => {
 
 // Live price refresh for currently displayed symbols
 app.get('/api/live-prices', async (req, res) => {
-  const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean);
+  const symbols = (req.query.symbols || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 50);
   if (!symbols.length) return res.json({});
   const results = {};
   for (const sym of symbols) {
