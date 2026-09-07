@@ -194,6 +194,9 @@ function computeRegime(niftyBars) {
   }
 
   const { scaler_mean, scaler_scale, regime_map } = _hmmParams;
+  if (!Array.isArray(scaler_mean) || !Array.isArray(scaler_scale) || !regime_map) {
+    return { regime: _currentRegime || 'Unknown', state: -1, score: 0.5 };
+  }
   const bars   = niftyBars.slice(-250);
   const closes = bars.map(b => b.close);
   const vols   = bars.map(b => b.volume || 1);

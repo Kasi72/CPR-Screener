@@ -551,19 +551,30 @@ _startupPromise = Promise.all([
   loadBhavCopy(),
 ]).then(() => {
   _serverReady = true;
-  if (niftyBarsCache.length >= 10) {
-    const r = mlEngine.computeRegime(niftyBarsCache);
-    console.log(`  ML Regime: ${r.regime} (score=${r.score})`);
+  try {
+    if (niftyBarsCache.length >= 10) {
+      const r = mlEngine.computeRegime(niftyBarsCache);
+      console.log(`  ML Regime: ${r.regime} (score=${r.score})`);
+    }
+  } catch (e) {
+    console.warn('  ML Regime compute skipped:', e.message);
   }
   // PCR needs NSE session — load after session is warmed by index data
   loadPCR().catch(() => {});
   setInterval(() => {
     loadIndexData().then(() => {
-      if (niftyBarsCache.length >= 10) mlEngine.computeRegime(niftyBarsCache);
+      try {
+        if (niftyBarsCache.length >= 10) mlEngine.computeRegime(niftyBarsCache);
+      } catch (e) {
+        console.warn('  ML Regime refresh skipped:', e.message);
+      }
     });
     loadBhavCopy().catch(() => {});
     loadPCR().catch(() => {});
   }, 6 * 60 * 60 * 1000);
+}).catch(e => {
+  console.warn('Startup data load error:', e.message);
+  _serverReady = true; // allow screener to proceed with partial data
 });
 
 // Latest available values (for today when market is open)
