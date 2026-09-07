@@ -30,7 +30,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r scripts/ml/requirements.txt
+        run: pip install -r scripts/ml/requirements.txt kaggle
 
       - name: Set up Kaggle credentials
         run: |
