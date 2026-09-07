@@ -40,11 +40,30 @@ jobs:
             "${{ secrets.KAGGLE_KEY }}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
+      - name: Download signal dataset from Kaggle
+        run: |
+          mkdir -p models
+          # Download signal_dataset.csv from private Kaggle dataset
+          # Dataset must be uploaded once: kaggle datasets create -p models/ --dir-mode zip
+          # Set KAGGLE_DATASET_SLUG secret to e.g. "kasi72/cpr-screener-dataset"
+          SLUG="${{ secrets.KAGGLE_DATASET_SLUG }}"
+          if [ -n "$SLUG" ]; then
+            kaggle datasets download -d "$SLUG" -p models/ --unzip
+            echo "Dataset downloaded from Kaggle: $SLUG"
+          else
+            echo "KAGGLE_DATASET_SLUG not set — skipping dataset download (Phase 1 will be skipped)"
+          fi
+
       - name: Run training pipeline
         run: |
           ARGS="--skip-dataset"
           [ "${{ inputs.skip_upload }}" = "true" ]  && ARGS="$ARGS --skip-upload"
           [ "${{ inputs.local_phase4 }}" = "true" ] && ARGS="$ARGS --local-phase4"
+          # If signal_dataset.csv missing, skip phase 1 (just retrain HMM + commit)
+          if [ ! -f models/signal_dataset.csv ]; then
+            echo "WARNING: signal_dataset.csv not found — skipping Phase 1 LGBM training"
+            ARGS="$ARGS --skip-phase1"
+          fi
           python scripts/ml/run_all.py $ARGS
 
       - name: Commit updated models

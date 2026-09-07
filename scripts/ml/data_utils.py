@@ -18,8 +18,11 @@ from scipy.signal import savgol_filter
 
 # ── 1. CONSTANTS ──────────────────────────────────────────────────────────────
 
-DATA_FILE  = r"C:\Users\drkkr\Downloads\NIFTY 500 OHLCV\ALL_SYMBOLS_OHLCV.csv"
-MODELS_DIR = r"D:\Claude code\nse-screener\models"
+import os as _os
+_HERE      = _os.path.dirname(_os.path.abspath(__file__))
+_BASE      = _os.path.dirname(_os.path.dirname(_HERE))
+DATA_FILE  = _os.environ.get('NSE_DATA_FILE', r"C:\Users\drkkr\Downloads\NIFTY 500 OHLCV\ALL_SYMBOLS_OHLCV.csv")
+MODELS_DIR = _os.environ.get('NSE_MODELS_DIR', _os.path.join(_BASE, 'models'))
 
 FEATURE_COLS = [
     # original 12
