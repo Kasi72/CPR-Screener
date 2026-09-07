@@ -539,12 +539,13 @@ async function loadPCR() {
   }
 }
 
-// Startup readiness flag — screener returns 503 until initial data loaded
+// Startup readiness — awaited by screener handler on cold start
 let _serverReady = false;
+let _startupPromise;
 
 // Load at startup; refresh every 6 hours
 mlEngine.init();
-Promise.all([
+_startupPromise = Promise.all([
   loadIndexData(),
   loadSectorData(),
   loadBhavCopy(),
@@ -1944,10 +1945,8 @@ app.get('/api/market-status', (_req, res) => {
 });
 
 app.get('/api/screen/stream', async (req, res) => {
-  if (!_serverReady) {
-    res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '5' });
-    return res.end(JSON.stringify({ error: 'Server warming up — retry in 5s' }));
-  }
+  // On serverless cold start, wait for startup data before proceeding
+  if (!_serverReady) await _startupPromise;
 
   res.writeHead(200, {
     'Content-Type':  'text/event-stream',
