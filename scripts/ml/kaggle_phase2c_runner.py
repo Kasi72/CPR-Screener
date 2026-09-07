@@ -222,6 +222,11 @@ def main(timeout_minutes=120, upload=True):
     print('  Phase 2c: Regime-Conditional LightGBM HPO Runner')
     print('=' * 60)
 
+    if not os.path.exists(SIGNAL_CSV):
+        print('  WARN: signal_dataset.csv not found — skipping Phase 2c (Kaggle HPO)')
+        print('  Existing lgbm2c models retained.')
+        return
+
     if upload:
         upload_dataset()
         wait_for_dataset_ready()

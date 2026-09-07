@@ -181,6 +181,11 @@ def main(timeout_minutes=90, upload=True):
     print('  Phase 2b: Kaggle LightGBM HPO Runner')
     print('=' * 60)
 
+    if not os.path.exists(SIGNAL_CSV):
+        print('  WARN: signal_dataset.csv not found — skipping Phase 2b (Kaggle HPO)')
+        print('  Existing lgbm_scorer.txt retained.')
+        return
+
     if upload:
         upload_dataset()
         wait_for_dataset_ready()

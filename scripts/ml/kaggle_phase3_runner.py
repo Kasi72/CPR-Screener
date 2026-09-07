@@ -281,6 +281,11 @@ def main(timeout_minutes=120, skip_upload=False):
     print("  Phase 3: Kaggle GPU Runner")
     print("=" * 60)
 
+    if not os.path.exists(SIGNAL_CSV):
+        print('  WARN: signal_dataset.csv not found — skipping Phase 3 (Kaggle GPU)')
+        print('  Existing lstm_model.pt retained.')
+        return
+
     staging_dir = tempfile.mkdtemp(prefix='kaggle_p3_stage_')
     try:
         package_inputs(staging_dir, skip_ohlcv=skip_upload)
