@@ -2438,8 +2438,10 @@ const App = {
         if (msg.type === 'tick') {
           done = msg.done; matched = msg.matched;
           State.scanned = done;
-          State.results.push(msg.result);
-          this.appendRow(msg.result);
+          if (msg.result) {
+            State.results.push(msg.result);
+            this.appendRow(msg.result);
+          }
           const pct = total > 0 ? (done / total * 100) : 0;
           $('progressFill').style.width = pct + '%';
           $('progressText').textContent = `${done} / ${total} — ${matched} matched`;

@@ -1956,7 +1956,7 @@ app.get('/api/screen/stream', async (req, res) => {
     'X-Accel-Buffering': 'no'
   });
 
-  const VALID_TF   = new Set(['1d', '1w', '1m']);
+  const VALID_TF   = new Set(['1d', '1w', '1M']);
   const VALID_MODE = new Set(['any', 'all']);
   const tf       = VALID_TF.has(req.query.tf)   ? req.query.tf   : '1d';
   const mode     = VALID_MODE.has(req.query.mode) ? req.query.mode : 'any';
@@ -2011,7 +2011,7 @@ app.get('/api/screen/stream', async (req, res) => {
     for (const result of results) {
       done++;
       if (result.error) {
-        emit({ type: 'err', done, total: symbols.length, sym: result.symbol, msg: result.error });
+        emit({ type: 'err', done, total: totalAll, sym: result.symbol, msg: result.error });
         continue;
       }
 
@@ -2025,16 +2025,16 @@ app.get('/api/screen/stream', async (req, res) => {
 
       if (passes) {
         matched++;
-        emit({ type: 'tick', done, total: symbols.length, matched, result });
+        emit({ type: 'tick', done, total: totalAll, matched, result });
       } else {
-        emit({ type: 'skip', done, total: symbols.length, matched, sym: result.symbol });
+        emit({ type: 'skip', done, total: totalAll, matched, sym: result.symbol });
       }
     }
 
     if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 5));
   }
 
-  emit({ type: 'done', total: symbols.length, matched, elapsed: Date.now() - t0 });
+  emit({ type: 'done', total: totalAll, matched, elapsed: Date.now() - t0 });
   res.end();
 });
 
