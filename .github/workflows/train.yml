@@ -41,15 +41,15 @@ jobs:
           chmod 600 ~/.kaggle/kaggle.json
 
       - name: Download signal dataset from Kaggle
+        continue-on-error: true
         run: |
           mkdir -p models
           SLUG="${{ secrets.KAGGLE_DATASET_SLUG }}"
           if [ -n "$SLUG" ]; then
-            kaggle datasets download -d "$SLUG" -p models/ --unzip && \
-              echo "Dataset downloaded: $SLUG" || \
-              echo "WARNING: Kaggle download failed — Phase 1 LGBM will be skipped"
+            kaggle datasets download -d "$SLUG" -p models/ --unzip
+            echo "Dataset downloaded: $SLUG"
           else
-            echo "KAGGLE_DATASET_SLUG not set — skipping dataset download"
+            echo "KAGGLE_DATASET_SLUG not set — skipping"
           fi
 
       - name: Run training pipeline
