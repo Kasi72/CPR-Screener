@@ -1,0 +1,104 @@
+PROPRIETARY SOFTWARE LICENSE
+============================
+
+Copyright (c) 2024–2026 Kasi (GitHub: Kasi72)
+All Rights Reserved.
+
+NOTICE: This software, including all source code, algorithms, machine learning
+models, trading logic, backtesting methodology, signal generation rules, and
+associated documentation files (collectively, the "Software"), is the exclusive
+intellectual property of the copyright holder named above.
+
+─────────────────────────────────────────────────────────────────────────────
+
+GRANT OF LICENSE
+
+The copyright holder grants NO license, express or implied, to any person or
+entity to use, copy, modify, merge, publish, distribute, sublicense, sell, or
+incorporate this Software or any portion thereof into any product or service
+without the express prior written consent of the copyright holder.
+
+─────────────────────────────────────────────────────────────────────────────
+
+RESTRICTIONS
+
+Without the prior written consent of the copyright holder, you MAY NOT:
+
+  1. Copy, reproduce, or duplicate any portion of this Software.
+  2. Distribute, transfer, or make available this Software to any third party.
+  3. Modify, adapt, translate, reverse-engineer, decompile, or disassemble
+     this Software or any component thereof.
+  4. Create derivative works based on this Software.
+  5. Use this Software or any portion thereof for commercial purposes, including
+     but not limited to operating a trading service, subscription product,
+     financial advisory tool, or data aggregation service.
+  6. Use the trading rules, ML model architectures, backtesting methodology,
+     CPR/Camarilla signal logic, or R:R calibration methods contained herein
+     in any other software, system, or publication.
+  7. Remove, alter, or obscure any copyright notice, proprietary legend, or
+     attribution embedded in this Software.
+  8. Train, fine-tune, or distil any machine learning model using the code,
+     signals, outputs, or data produced by this Software.
+
+─────────────────────────────────────────────────────────────────────────────
+
+PERMITTED VIEWING
+
+You MAY view this repository and its source code solely for personal
+educational reference, provided that you do not exercise any of the restricted
+rights listed above.
+
+─────────────────────────────────────────────────────────────────────────────
+
+INTELLECTUAL PROPERTY
+
+The following elements are trade secrets and proprietary innovations of the
+copyright holder:
+
+  • CPR-based signal generation rules (rule1–rule11) and their backtest-
+    calibrated parameter sets.
+  • LGBM2c and PPO inference pipeline with India VIX integration.
+  • MFE/MAE grid-search calibration methodology for NSE equity markets.
+  • High Yield filter logic derived from 4.56 million signal backtests.
+  • Three-mode hold-duration calibration (3-day / 1-week / 3-week).
+  • Camarilla + CPR confluence scoring framework.
+
+─────────────────────────────────────────────────────────────────────────────
+
+DISCLAIMER OF WARRANTIES
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. THE COPYRIGHT HOLDER MAKES NO
+REPRESENTATION OR WARRANTY THAT THIS SOFTWARE WILL MEET YOUR REQUIREMENTS OR
+THAT ITS OPERATION WILL BE UNINTERRUPTED OR ERROR-FREE.
+
+─────────────────────────────────────────────────────────────────────────────
+
+DISCLAIMER OF FINANCIAL LIABILITY
+
+This Software is provided for informational and research purposes only. Nothing
+in this Software constitutes financial advice, investment advice, trading advice,
+or any other type of advice. The copyright holder accepts no liability for any
+financial loss, whether direct, indirect, incidental, or consequential, arising
+from use of or reliance on this Software or its outputs.
+
+─────────────────────────────────────────────────────────────────────────────
+
+ENFORCEMENT
+
+Unauthorised use, reproduction, or distribution of this Software or any
+portion thereof may result in severe civil and criminal penalties and will be
+prosecuted to the maximum extent possible under applicable law.
+
+─────────────────────────────────────────────────────────────────────────────
+
+CONTACT
+
+For licensing inquiries, commercial use requests, or permissions beyond the
+scope of this license, contact the copyright holder via:
+  GitHub: https://github.com/Kasi72
+
+─────────────────────────────────────────────────────────────────────────────
+
+All rights not expressly granted herein are reserved by the copyright holder.
