@@ -3045,7 +3045,16 @@ const Train = (() => {
         fetchStatus(); // refresh last-run timestamp
       }
     };
-    _sse.onerror = () => { _sse.close(); _sse = null; };
+    _sse.onerror = () => {
+      _sse.close(); _sse = null;
+      // SSE may drop on Vercel timeout — fall back to polling if still running
+      if (isRunning()) {
+        const piv = setInterval(() => {
+          fetchStatus();
+          if (!isRunning()) clearInterval(piv);
+        }, 15000);
+      }
+    };
   }
 
   function start() {

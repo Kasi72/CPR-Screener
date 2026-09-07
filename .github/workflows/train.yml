@@ -1,0 +1,60 @@
+name: ML Training Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_upload:
+        description: 'Re-use existing Kaggle dataset (Phase 3)'
+        required: false
+        default: 'false'
+        type: boolean
+      local_phase4:
+        description: 'Run Phase 4 PPO locally (skip Kaggle)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r scripts/ml/requirements.txt
+
+      - name: Set up Kaggle credentials
+        run: |
+          mkdir -p ~/.kaggle
+          printf '{"username":"%s","key":"%s"}' \
+            "${{ secrets.KAGGLE_USERNAME }}" \
+            "${{ secrets.KAGGLE_KEY }}" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Run training pipeline
+        run: |
+          ARGS="--skip-dataset"
+          [ "${{ inputs.skip_upload }}" = "true" ]  && ARGS="$ARGS --skip-upload"
+          [ "${{ inputs.local_phase4 }}" = "true" ] && ARGS="$ARGS --local-phase4"
+          python scripts/ml/run_all.py $ARGS
+
+      - name: Commit updated models
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add models/
+          if git diff --staged --quiet; then
+            echo "No model changes to commit."
+          else
+            git commit -m "chore: update trained models [skip ci]"
+            git push
+          fi

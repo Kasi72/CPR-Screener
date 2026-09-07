@@ -2068,16 +2068,85 @@ const LAST_RUN_F  = path.join(__dirname, 'auto_retrain_cpr.last_run');
 
 let trainJob = { proc: null, status: 'idle', log: [], startedAt: null, exitCode: null };
 
-app.get('/api/train/status', (_req, res) => {
+// ─── GITHUB ACTIONS HELPERS (Vercel path) ─────────────────────────────────────
+const GH_REPO     = process.env.GITHUB_REPO     || 'Kasi72/CPR-Screener';
+const GH_WORKFLOW = 'train.yml';
+
+function _ghToken() { return process.env.GITHUB_TOKEN || ''; }
+
+async function _ghFetch(endpoint, opts = {}) {
+  const token = _ghToken();
+  if (!token) throw new Error('GITHUB_TOKEN not set');
+  return fetch(`https://api.github.com/repos/${GH_REPO}/${endpoint}`, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...opts.headers,
+    },
+    signal: opts.signal ?? AbortSignal.timeout(8000),
+  });
+}
+
+async function _ghLatestRun() {
+  const r = await _ghFetch(`actions/workflows/${GH_WORKFLOW}/runs?per_page=1`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  return d.workflow_runs?.[0] ?? null;
+}
+
+function _ghRunStatus(run) {
+  if (run.status === 'completed') return run.conclusion === 'success' ? 'done' : 'failed';
+  return run.status === 'queued' ? 'starting' : 'running';
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/train/status', async (_req, res) => {
+  if (process.env.VERCEL && _ghToken()) {
+    try {
+      const run = await _ghLatestRun();
+      if (run) {
+        return res.json({
+          status:     _ghRunStatus(run),
+          startedAt:  run.created_at,
+          lastRun:    run.updated_at,
+          githubUrl:  run.html_url,
+        });
+      }
+    } catch {}
+  }
   let lastRun = null;
   try { lastRun = fs.readFileSync(LAST_RUN_F, 'utf8').trim(); } catch {}
   res.json({ status: trainJob.status, startedAt: trainJob.startedAt, lastRun });
 });
 
-app.post('/api/train/start', (req, res) => {
+app.post('/api/train/start', async (req, res) => {
   if (process.env.VERCEL) {
-    return res.status(501).json({ error: 'Training requires a local Python environment and cannot run on Vercel. Run the server locally to use this feature.' });
+    if (!_ghToken()) {
+      return res.status(501).json({ error: 'Set GITHUB_TOKEN in Vercel environment variables to enable cloud training via GitHub Actions.' });
+    }
+    const inputs = {};
+    if (req.query.skipUpload  === '1') inputs.skip_upload  = 'true';
+    if (req.query.localPhase4 === '1') inputs.local_phase4 = 'true';
+    try {
+      const r = await _ghFetch(`actions/workflows/${GH_WORKFLOW}/dispatches`, {
+        method: 'POST',
+        body: JSON.stringify({ ref: 'master', inputs }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        return res.status(502).json({ error: `GitHub dispatch failed: ${err.message || r.status}` });
+      }
+    } catch (e) {
+      return res.status(502).json({ error: `GitHub dispatch error: ${e.message}` });
+    }
+    const ghUrl = `https://github.com/${GH_REPO}/actions/workflows/${GH_WORKFLOW}`;
+    trainJob = { proc: null, status: 'running', log: ['✓ Dispatched to GitHub Actions.', `Open for live logs: ${ghUrl}`], startedAt: new Date().toISOString(), exitCode: null };
+    return res.json({ started: true, github: true });
   }
+
   if (trainJob.proc) return res.status(409).json({ error: 'Training already running' });
 
   const skipUpload = req.query.skipUpload === '1';
@@ -2128,7 +2197,7 @@ app.post('/api/train/cancel', (_req, res) => {
   res.json({ cancelled: true });
 });
 
-app.get('/api/train/stream', (req, res) => {
+app.get('/api/train/stream', async (req, res) => {
   res.writeHead(200, {
     'Content-Type':  'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -2137,9 +2206,34 @@ app.get('/api/train/stream', (req, res) => {
   });
 
   const emit = obj => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+  let closed = false;
+  req.on('close', () => { closed = true; });
 
+  // Vercel path: poll GitHub Actions for status updates
+  if (process.env.VERCEL && _ghToken()) {
+    trainJob.log.forEach(line => emit({ line }));
+    emit({ status: 'running' });
+
+    const poll = async () => {
+      if (closed || res.writableEnded) return;
+      try {
+        const run = await _ghLatestRun();
+        if (!run) return;
+        const status = _ghRunStatus(run);
+        emit({ status, line: `GitHub Actions: ${run.status}${run.status === 'completed' ? ' — ' + run.conclusion : ''}` });
+        if (status === 'done' || status === 'failed') {
+          if (!res.writableEnded) res.end();
+          return;
+        }
+      } catch {}
+      if (!closed) setTimeout(poll, 15000);
+    };
+    setTimeout(poll, 5000);
+    return;
+  }
+
+  // Local path: stream in-memory trainJob log
   let sent = 0;
-  // Flush backlog immediately
   trainJob.log.slice(0, sent = trainJob.log.length).forEach(line => emit({ line }));
   emit({ status: trainJob.status, startedAt: trainJob.startedAt });
 
