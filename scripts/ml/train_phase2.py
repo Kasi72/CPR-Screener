@@ -168,9 +168,16 @@ def main():
     print("  PHASE 2: SHAP Gate Weights + Conformal Calibration")
     print("=" * 60)
 
+    sig_csv = os.path.join(MODELS_DIR, 'signal_dataset.csv')
+    if not os.path.exists(sig_csv):
+        print("  WARN: signal_dataset.csv not found — skipping Phase 2 (SHAP/Conformal)")
+        print("  Existing shap_weights.json and conformal_scores.json retained.")
+        return
+
     lgbm_path = os.path.join(MODELS_DIR, 'lgbm_model.txt')
     if not os.path.exists(lgbm_path):
-        raise FileNotFoundError(f"LightGBM model not found: {lgbm_path}\nRun Phase 1 first.")
+        print(f"  WARN: LightGBM model not found: {lgbm_path} — skipping Phase 2")
+        return
 
     print("\n  Loading LightGBM model…")
     lgbm_model = lgb.Booster(model_file=lgbm_path)

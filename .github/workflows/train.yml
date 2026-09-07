@@ -47,7 +47,14 @@ jobs:
           SLUG="${{ secrets.KAGGLE_DATASET_SLUG }}"
           if [ -n "$SLUG" ]; then
             kaggle datasets download -d "$SLUG" -p models/ --unzip
-            echo "Dataset downloaded: $SLUG"
+            # Kaggle may extract into a subdirectory named after the dataset slug
+            SUBDIR="models/$(echo $SLUG | cut -d/ -f2)"
+            if [ -d "$SUBDIR" ]; then
+              echo "Moving files from $SUBDIR to models/"
+              mv "$SUBDIR"/* models/
+              rmdir "$SUBDIR" 2>/dev/null || true
+            fi
+            ls models/signal_dataset.csv && echo "signal_dataset.csv ready" || echo "WARNING: signal_dataset.csv not found after download"
           else
             echo "KAGGLE_DATASET_SLUG not set — skipping"
           fi
