@@ -57,11 +57,7 @@ jobs:
           ARGS="--skip-dataset"
           [ "${{ inputs.skip_upload }}" = "true" ]  && ARGS="$ARGS --skip-upload"
           [ "${{ inputs.local_phase4 }}" = "true" ] && ARGS="$ARGS --local-phase4"
-          # If signal_dataset.csv missing, skip phase 1 (just retrain HMM + commit)
-          if [ ! -f models/signal_dataset.csv ]; then
-            echo "WARNING: signal_dataset.csv not found — skipping Phase 1 LGBM training"
-            ARGS="$ARGS --skip-phase1"
-          fi
+          # Phase 1 HMM runs regardless; LGBM skips gracefully if dataset missing
           python scripts/ml/run_all.py $ARGS
 
       - name: Commit updated models

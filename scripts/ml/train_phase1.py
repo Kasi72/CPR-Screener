@@ -478,12 +478,17 @@ def main():
     import subprocess
     _this = os.path.abspath(__file__)
     _base = os.path.dirname(os.path.dirname(os.path.dirname(_this)))
+    sig_csv = os.path.join(MODELS_DIR, 'signal_dataset.csv')
+    if not os.path.exists(sig_csv):
+        print(f"  WARN: signal_dataset.csv not found — skipping Phase 1B LGBM training")
+        print(f"  HMM models saved. LGBM requires signal_dataset.csv to retrain.")
+        return
     result = subprocess.run(
         [sys.executable, _this, '--lgbm-only'],
         cwd=_base, check=False
     )
     if result.returncode != 0:
-        sys.exit(result.returncode)
+        print(f"  WARN: Phase 1B LGBM failed (exit {result.returncode}) — HMM still saved")
 
 
 if __name__ == '__main__':
