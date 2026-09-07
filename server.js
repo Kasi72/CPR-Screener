@@ -2075,6 +2075,9 @@ app.get('/api/train/status', (_req, res) => {
 });
 
 app.post('/api/train/start', (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(501).json({ error: 'Training requires a local Python environment and cannot run on Vercel. Run the server locally to use this feature.' });
+  }
   if (trainJob.proc) return res.status(409).json({ error: 'Training already running' });
 
   const skipUpload = req.query.skipUpload === '1';
