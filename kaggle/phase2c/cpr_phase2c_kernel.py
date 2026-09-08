@@ -69,7 +69,9 @@ BASE_FEATURES = [
     # Sprint 3: gap + bar quality + volatility + volume structure
     'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
     'atr_expansion', 'vol_trend_slope',
-]  # 56 base features
+    # Sprint 4: weekly CPR features (rule15 primary signals)
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58 base features
 
 INTERACTION_FEATURES = [
     'cpr_vol_interaction',      # cpr_compress × vol_rank

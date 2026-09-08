@@ -1531,7 +1531,7 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
 const State = {
   timeframe: '1d',
   matchMode: 'any',
-  activeRules: new Set(['rule1','rule2','rule3','rule4','rule5','rule6','rule7','rule8','rule9','rule10','rule11']),
+  activeRules: new Set(['rule1','rule2','rule3','rule4','rule5','rule6','rule7','rule8','rule9','rule10','rule11','rule12','rule13','rule14','rule15','rule16']),
   narrowThreshold: 0.5,
   holdMode: 'swing',
   disabledGates: new Set(),
@@ -1560,8 +1560,13 @@ const RULE_META = {
   rule7:  { color: '#14b8a6', bg: 'rgba(20,184,166,0.12)',  border: 'rgba(20,184,166,0.3)',  label: 'R7'  },
   rule8:  { color: '#a855f7', bg: 'rgba(168,85,247,0.12)',  border: 'rgba(168,85,247,0.3)',  label: 'R8'  },
   rule9:  { color: '#eab308', bg: 'rgba(234,179,8,0.12)',   border: 'rgba(234,179,8,0.3)',   label: 'R9'  },
-  rule10: { color: '#22d3ee', bg: 'rgba(34,211,238,0.12)',  border: 'rgba(34,211,238,0.3)',  label: 'R10' }, // Price Testing CPR S/R
-  rule11: { color: '#84cc16', bg: 'rgba(132,204,22,0.12)',  border: 'rgba(132,204,22,0.3)',  label: 'R11' }
+  rule10: { color: '#22d3ee', bg: 'rgba(34,211,238,0.12)',  border: 'rgba(34,211,238,0.3)',  label: 'R10' },
+  rule11: { color: '#84cc16', bg: 'rgba(132,204,22,0.12)',  border: 'rgba(132,204,22,0.3)',  label: 'R11' },
+  rule12: { color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   border: 'rgba(244,63,94,0.3)',   label: 'R12' },
+  rule13: { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', border: 'rgba(167,139,250,0.3)', label: 'R13' },
+  rule14: { color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  border: 'rgba(251,146,60,0.3)',  label: 'R14' },
+  rule15: { color: '#34d399', bg: 'rgba(52,211,153,0.12)',  border: 'rgba(52,211,153,0.3)',  label: 'R15' },
+  rule16: { color: '#fbbf24', bg: 'rgba(251,191,36,0.12)',  border: 'rgba(251,191,36,0.3)',  label: 'R16' }
 };
 
 const TF_HINTS = {
@@ -1876,6 +1881,11 @@ async function initRules() {
       {id:'rule9',name:'Pivot Magnetic Pull',        desc:'Price >2% from pivot — mean-reversion to pivot (Win 76.8%)',sharpe:4.45},
       {id:'rule10',name:'CPR S/R Test',              desc:'Period H/L touching CPR band boundaries',        sharpe:2.89},
       {id:'rule11',name:'VWAP-to-TC Setup',          desc:'Price between VWAP and CPR edge — breakout coil',sharpe:5.27},
+      {id:'rule12',name:'Virgin CPR Test',            desc:'First touch of 20-day-untested CPR with volume urgency',sharpe:null},
+      {id:'rule13',name:'Squeeze Breakout',           desc:'3+ narrow CPR days then decisive expansion + volume surge',sharpe:null},
+      {id:'rule14',name:'Gap-Over-CPR',               desc:'Clean gap held all day + Ochoa trend yesterday',sharpe:null},
+      {id:'rule15',name:'Weekly CPR Break',           desc:'First break of weekly TC/BC — institutional repositioning',sharpe:null},
+      {id:'rule16',name:'Multi-Factor Confluence',    desc:'All 8 factors aligned: CPR + PCR + VIX + regime + RS + delivery + momentum + EMA',sharpe:null},
     ];
   }
   populateStrategyDropdown();
@@ -1909,7 +1919,8 @@ function updateStrategySelection() {
 
   if (val === '__all__') {
     State.activeRules = new Set(['rule1','rule2','rule3','rule4','rule5','rule6',
-                                  'rule7','rule8','rule9','rule10','rule11']);
+                                  'rule7','rule8','rule9','rule10','rule11',
+                                  'rule12','rule13','rule14','rule15','rule16']);
     modeWrap.style.display   = '';
     narrowWrap.style.display = 'none';
     descEl.innerHTML = '<span style="color:#4ade80">All 11 strategies active.</span> Use Match Mode for AND/OR logic.';

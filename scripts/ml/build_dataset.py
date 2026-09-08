@@ -44,7 +44,7 @@ MAX_HOLD        = 5
 MIN_BARS        = 60
 MIN_RULES_FIRED = 2    # confluence gate: skip single-rule signals (weaker, noisier)
 
-RULE_MAP = {f'rule{i}': i for i in range(1, 12)}
+RULE_MAP = {f'rule{i}': i for i in range(1, 17)}
 
 
 def asymmetric_exit(direction, entry, fh, fl, fc):
@@ -119,6 +119,16 @@ def get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl, prev_vwap=None, 
     if rid == 'rule10':
         ht = cpr['upper'] > 0 and abs(ph - cpr['upper']) / cpr['upper'] < 0.005
         return -1 if ht else 1
+    # rule12: Virgin CPR — approaching TC from below=short, approaching BC from above=long
+    if rid == 'rule12': return 1 if cur_close < cpr['pivot'] else -1
+    # rule13: Squeeze Breakout — direction by price side of CPR
+    if rid == 'rule13': return 1 if cur_close > cpr['upper'] else -1
+    # rule14: Gap-Over-CPR — direction by price side of CPR
+    if rid == 'rule14': return 1 if cur_close > cpr['upper'] else -1
+    # rule15: Weekly CPR break — set externally via weekly_price_above_wtc flag (default long)
+    if rid == 'rule15': return 1 if cur_close >= cpr['pivot'] else -1
+    # rule16: Multi-factor confluence — direction by CPR side
+    if rid == 'rule16': return 1 if cur_close >= cpr['pivot'] else -1
     return 1 if cur_close >= cpr['pivot'] else -1
 
 
@@ -467,6 +477,93 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         else:
             prev_day_ochoa_type = 1
 
+        # ── Weekly CPR computation ────────────────────────────────────────────────
+        cur_dt     = pd.Timestamp(dates[i])
+        week_start = cur_dt - pd.Timedelta(days=cur_dt.dayofweek)  # Monday of current week
+        prior_week_mask = (
+            (pd.DatetimeIndex(dates) >= week_start - pd.Timedelta(days=7))
+            & (pd.DatetimeIndex(dates) < week_start)
+        )
+        prior_week_idx = np.where(prior_week_mask)[0]
+        weekly_cpr_first_break = False
+        weekly_price_above_wtc = cur_close >= cpr['pivot']
+        if len(prior_week_idx) >= 3:
+            w_H = highs[prior_week_idx].max()
+            w_L = lows[prior_week_idx].min()
+            w_C = closes[prior_week_idx[-1]]
+            w_P  = (w_H + w_L + w_C) / 3.0
+            w_TC = (w_H + w_L) / 2.0
+            w_BC = 2.0 * w_P - w_TC
+            weekly_price_above_wtc = cur_close > w_TC
+            week_so_far_mask = (
+                (pd.DatetimeIndex(dates) >= week_start)
+                & (pd.DatetimeIndex(dates) <= cur_dt)
+            )
+            wsf_idx = np.where(week_so_far_mask)[0]
+            if len(wsf_idx) > 1:
+                prev_above_wtc = sum(closes[j] > w_TC for j in wsf_idx[:-1])
+                prev_below_wbc = sum(closes[j] < w_BC for j in wsf_idx[:-1])
+                weekly_cpr_first_break = (
+                    (cur_close > w_TC and prev_above_wtc == 0) or
+                    (cur_close < w_BC and prev_below_wbc == 0)
+                )
+
+        # ── New rules 12-16 (extra fired list, merged into fired before direction loop) ──
+        _extra_fired = []
+
+        # rule12: Virgin CPR Precision Test
+        # First touch of 20-day-untouched CPR — institutional S/R with volume urgency
+        if cpr_virgin == 1.0:
+            near_tc = 0 < (cpr['upper'] - cur_close) / max(cpr['upper'], 1) < 0.004
+            near_bc = 0 < (cur_close - cpr['lower']) / max(cpr['lower'], 1) < 0.004
+            if (near_tc or near_bc) and vol_rank >= 0.85 and open_inside_cpr == 0.0 and prev_cpr_respected == 1.0:
+                _extra_fired.append('rule12')
+
+        # rule13: CPR Squeeze Breakout — 3+ narrow days then decisive expansion + vol surge
+        is_squeeze_release = (
+            consecutive_narrow_cprs >= 3
+            and cpr_expansion_factor >= 1.4
+            and cpr_width_percentile_252d >= 0.50
+        )
+        broke_upper = cur_close > cpr['upper'] and gap_pct > -0.005
+        broke_lower = cur_close < cpr['lower'] and gap_pct < 0.005
+        if is_squeeze_release and (broke_upper or broke_lower) and vol_rank >= 0.9 and vol_trend_slope > 0.0 and atr_expansion >= 1.15:
+            _extra_fired.append('rule13')
+
+        # rule14: Gap-Over-CPR Continuation — clean gap held all day + Ochoa trend yesterday
+        gap_above = opens[i] > cpr['upper'] * 1.002
+        gap_below = opens[i] < cpr['lower'] * 0.998
+        held_above = gap_above and cur_close > cpr['upper']
+        held_below = gap_below and cur_close < cpr['lower']
+        dir_bull = gap_above and prev_close > cpr['upper']
+        dir_bear = gap_below and prev_close < cpr['lower']
+        if (held_above or held_below) and prev_day_ochoa_type == 0 and 0.80 <= vol_rank <= 3.5 and (dir_bull or dir_bear):
+            _extra_fired.append('rule14')
+
+        # rule15: Weekly CPR Breakout — first break of weekly TC/BC this week + Mon-Wed only
+        if weekly_cpr_first_break and vol_rank >= 0.85 and market_rs_5d > 1.0 and cur_dt.dayofweek <= 2:
+            _extra_fired.append('rule15')
+
+        # rule16: Multi-Factor Confluence — all 8 factors aligned (bull or bear)
+        bull_conf = (
+            cur_close > cpr['upper'] and pcr < 0.85 and india_vix < 16.0
+            and bar_regime in (1, 2) and market_rs_5d > 1.015
+            and deliv_pct >= 38.0 and mom5 > 0.008 and ema200_dist > 0.0
+        )
+        bear_conf = (
+            cur_close < cpr['lower'] and pcr > 1.15 and india_vix > 17.0
+            and bar_regime in (2, 3) and market_rs_5d < 0.985
+            and deliv_pct < 25.0 and mom5 < -0.008 and ema200_dist < -0.005
+        )
+        if bull_conf or bear_conf:
+            _extra_fired.append('rule16')
+
+        fired = fired + _extra_fired
+        if not fired:
+            continue
+        if len(fired) < MIN_RULES_FIRED:
+            continue
+
         for rid in fired:
             direction  = get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl,
                                        prev_vwap=vwap_prev, vwap=vwap_cur)
@@ -566,6 +663,9 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
                 'prev_bar_close_pos':          round(prev_bar_close_pos, 4),
                 'atr_expansion':               round(atr_expansion, 4),
                 'vol_trend_slope':             round(vol_trend_slope, 4),
+                # --- Sprint 4: weekly CPR features (for rule15) ---
+                'weekly_cpr_first_break':      int(weekly_cpr_first_break),
+                'weekly_price_above_wtc':      int(weekly_price_above_wtc),
                 # --- labels ---
                 'atr_pct':       round(atr_pct, 6),
                 'actual_return': actual_ret,

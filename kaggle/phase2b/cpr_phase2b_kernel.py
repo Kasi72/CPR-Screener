@@ -53,7 +53,9 @@ FEATURE_COLS = [
     'dist_r1', 'dist_s1', 'mom3', 'mom10', 'mom20',
     'rsi_div', 'vol_accel_delta', 'days_since_52hi', 'expiry_dist',
     'regime_stability', 'transition_risk',
-]  # 38 features
+    # Sprint 4: weekly CPR
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 40 features
 
 # Features that should flip sign for SELL direction
 DIRECTIONAL_FEATURES = {

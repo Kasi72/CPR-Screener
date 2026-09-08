@@ -317,7 +317,9 @@ _P2C_BASE_FEATURES = [
     # Sprint 3: gap + bar quality + volatility + volume structure
     'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
     'atr_expansion', 'vol_trend_slope',
-]  # 56
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58
 
 _P2C_INTERACTION_FEATURES = [
     'cpr_vol_interaction',
@@ -365,6 +367,9 @@ _P2C_DEFAULTS = {
     'prev_bar_close_pos':        0.5,
     'atr_expansion':             1.0,
     'vol_trend_slope':           0.0,
+    # Sprint 4: weekly CPR
+    'weekly_cpr_first_break':    0.0,
+    'weekly_price_above_wtc':    0.0,
 }
 
 
