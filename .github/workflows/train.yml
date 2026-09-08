@@ -35,10 +35,16 @@ jobs:
       - name: Set up Kaggle credentials
         run: |
           mkdir -p ~/.kaggle
-          printf '{"username":"%s","key":"%s"}' \
-            "${{ secrets.KAGGLE_USERNAME }}" \
-            "${{ secrets.KAGGLE_KEY }}" > ~/.kaggle/kaggle.json
+          KEY="${{ secrets.KAGGLE_KEY }}"
+          if [[ "$KEY" == KGAT_* ]]; then
+            printf '{"token":"%s"}' "$KEY" > ~/.kaggle/kaggle.json
+            echo "Kaggle credentials: API token format (KGAT_...)"
+          else
+            printf '{"username":"%s","key":"%s"}' "${{ secrets.KAGGLE_USERNAME }}" "$KEY" > ~/.kaggle/kaggle.json
+            echo "Kaggle credentials: legacy key format"
+          fi
           chmod 600 ~/.kaggle/kaggle.json
+          kaggle config view || true
 
       - name: Download signal dataset from Kaggle
         continue-on-error: true
