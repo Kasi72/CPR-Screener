@@ -71,10 +71,12 @@ FEATURE_COLS = [
     # Sprint 3
     'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
     'atr_expansion', 'vol_trend_slope',
-]  # 56 base features
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58 base features
 
-# State: 56 signal features + lgbm2c_score + exposure + running_sharpe + win_streak
-STATE_DIM = len(FEATURE_COLS) + 4  # 56 + 4 = 60
+# State: 58 signal features + lgbm2c_score + exposure + running_sharpe + win_streak
+STATE_DIM = len(FEATURE_COLS) + 4  # 58 + 4 = 62
 
 
 # ── Trading Environment ────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ STATE_DIM = len(FEATURE_COLS) + 4  # 56 + 4 = 60
 class SignalSizingEnv(gym.Env):
     """
     Gym environment for signal position sizing.
-    State  : 56 signal features + [lgbm2c_score, exposure, running_sharpe, win_streak]
+    State  : 58 signal features + [lgbm2c_score, exposure, running_sharpe, win_streak]
     Action : Discrete(5) → [0%, 25%, 50%, 75%, 100%]
     Reward : P&L reward (trade_return - transaction_cost) — direct, low-variance signal
     """

@@ -86,7 +86,9 @@ _BASE_FEATURES = [
     # Sprint 3: gap + bar quality + volatility + volume structure
     'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
     'atr_expansion', 'vol_trend_slope',
-]  # 56
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58
 
 _INTERACTION_FEATURES = [
     'cpr_vol_interaction',       # cpr_compress x vol_rank
@@ -98,7 +100,7 @@ _INTERACTION_FEATURES = [
     'narrow_breakout_vol',       # consecutive_narrow_cprs x vol_rank
 ]  # 7
 
-FEATURE_COLS = _BASE_FEATURES + _INTERACTION_FEATURES  # 63 — matches Phase 2c model (56 base + 7 interactions)
+FEATURE_COLS = _BASE_FEATURES + _INTERACTION_FEATURES  # 65 — matches Phase 2c model (58 base + 7 interactions)
 
 # Directional features (sign flipped for SELL signals)
 _DIRECTIONAL = {
@@ -141,9 +143,11 @@ MONOTONE_CONSTRAINTS = [
     0, 0, 0, 1, 0,
     # Sprint 3: gap_pct, cpr_test_count_5d, prev_bar_close_pos, atr_expansion, vol_trend_slope
     0, 1, 1, 0, 1,
+    # Sprint 4: weekly_cpr_first_break, weekly_price_above_wtc
+    0, 0,
     # Interaction features (7) — no monotone direction
     0, 0, 0, 0, 0, 0, 0,
-]  # 63 — must match FEATURE_COLS length
+]  # 65 — must match FEATURE_COLS length
 
 SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5',
                  'ema14_dist', 'atr14', 'bb_pos', 'vol_mom']
