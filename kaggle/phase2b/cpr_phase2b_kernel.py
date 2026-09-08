@@ -76,7 +76,22 @@ def load_data():
             csv_path = hits[0]
             print(f'  Found at {csv_path}')
         else:
-            raise FileNotFoundError(f'signal_dataset.csv not found under {INPUT}')
+            # Dataset version may still be processing — poll up to 10 min
+            print(f'  signal_dataset.csv not at expected path. Polling /kaggle/input ...')
+            print(f'  Contents of /kaggle/input: {os.listdir("/kaggle/input")}')
+            deadline = time.time() + 600
+            found = False
+            while time.time() < deadline:
+                time.sleep(30)
+                hits = _glob.glob('/kaggle/input/**/signal_dataset.csv', recursive=True)
+                if hits:
+                    csv_path = hits[0]
+                    print(f'  Found at {csv_path}')
+                    found = True
+                    break
+                print(f'  Still waiting... /kaggle/input: {os.listdir("/kaggle/input")}')
+            if not found:
+                raise FileNotFoundError(f'signal_dataset.csv not found under {INPUT}')
 
     print(f'Loading {csv_path} ...')
     df = pd.read_csv(csv_path)
