@@ -319,7 +319,7 @@ _P2C_BASE_FEATURES = [
     'atr_expansion', 'vol_trend_slope',
     # Sprint 4: weekly CPR features
     'weekly_cpr_first_break', 'weekly_price_above_wtc',
-]  # 58
+]  # 58 base (+ 7 interactions = 65 total via _P2C_ALL_FEATURES)
 
 _P2C_INTERACTION_FEATURES = [
     'cpr_vol_interaction',

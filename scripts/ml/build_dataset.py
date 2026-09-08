@@ -119,8 +119,8 @@ def get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl, prev_vwap=None, 
     if rid == 'rule10':
         ht = cpr['upper'] > 0 and abs(ph - cpr['upper']) / cpr['upper'] < 0.005
         return -1 if ht else 1
-    # rule12: Virgin CPR — approaching TC from below=short, approaching BC from above=long
-    if rid == 'rule12': return 1 if cur_close < cpr['pivot'] else -1
+    # rule12: Virgin CPR — approaching TC from below=short (resistance), approaching BC from above=long (support)
+    if rid == 'rule12': return -1 if cur_close > cpr['pivot'] else 1
     # rule13: Squeeze Breakout — direction by price side of CPR
     if rid == 'rule13': return 1 if cur_close > cpr['upper'] else -1
     # rule14: Gap-Over-CPR — direction by price side of CPR
@@ -162,6 +162,9 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         calc_cpr(highs[j], lows[j], closes[j])['width_pct']
         for j in range(len(df) - 1)
     ], dtype=np.float32)
+
+    # Precompute DatetimeIndex once — used by weekly CPR mask inside bar loop
+    dates_dti = pd.DatetimeIndex(dates)
 
     rows = []
     for i in range(30, len(df) - MAX_HOLD - 1):
@@ -481,8 +484,8 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         cur_dt     = pd.Timestamp(dates[i])
         week_start = cur_dt - pd.Timedelta(days=cur_dt.dayofweek)  # Monday of current week
         prior_week_mask = (
-            (pd.DatetimeIndex(dates) >= week_start - pd.Timedelta(days=7))
-            & (pd.DatetimeIndex(dates) < week_start)
+            (dates_dti >= week_start - pd.Timedelta(days=7))
+            & (dates_dti < week_start)
         )
         prior_week_idx = np.where(prior_week_mask)[0]
         weekly_cpr_first_break = False
@@ -496,8 +499,8 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
             w_BC = 2.0 * w_P - w_TC
             weekly_price_above_wtc = cur_close > w_TC
             week_so_far_mask = (
-                (pd.DatetimeIndex(dates) >= week_start)
-                & (pd.DatetimeIndex(dates) <= cur_dt)
+                (dates_dti >= week_start)
+                & (dates_dti <= cur_dt)
             )
             wsf_idx = np.where(week_so_far_mask)[0]
             if len(wsf_idx) > 1:
@@ -559,10 +562,6 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
             _extra_fired.append('rule16')
 
         fired = fired + _extra_fired
-        if not fired:
-            continue
-        if len(fired) < MIN_RULES_FIRED:
-            continue
 
         for rid in fired:
             direction  = get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl,

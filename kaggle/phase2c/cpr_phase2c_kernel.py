@@ -71,7 +71,7 @@ BASE_FEATURES = [
     'atr_expansion', 'vol_trend_slope',
     # Sprint 4: weekly CPR features (rule15 primary signals)
     'weekly_cpr_first_break', 'weekly_price_above_wtc',
-]  # 58 base features
+]  # 58 base features (+ 7 interactions = 65 total)
 
 INTERACTION_FEATURES = [
     'cpr_vol_interaction',      # cpr_compress × vol_rank
@@ -83,7 +83,7 @@ INTERACTION_FEATURES = [
     'narrow_breakout_vol',      # consecutive_narrow_cprs × vol_rank
 ]  # 7 interaction features
 
-FEATURE_COLS = BASE_FEATURES + INTERACTION_FEATURES  # 63 total (56 base + 7 interactions)
+FEATURE_COLS = BASE_FEATURES + INTERACTION_FEATURES  # 65 total (58 base + 7 interactions)
 
 # Features requiring direction-adjustment (sign flips for SELL signals)
 DIRECTIONAL_FEATURES = {
