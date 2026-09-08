@@ -86,7 +86,8 @@ def wait_for_dataset_ready(max_wait_s=600):
         r = _run(['kaggle', 'datasets', 'files', DATASET_SLUG], check=False, capture=True)
         out = (r.stdout or '') + (r.stderr or '')
         if 'signal_dataset.csv' in out:
-            print(f'    Dataset ready (attempt {attempt}).')
+            print(f'    Dataset ready (attempt {attempt}). Waiting 90s for version commit ...')
+            time.sleep(90)
             return
         print(f'    [{attempt}] Not ready yet. Waiting 30s ...')
         time.sleep(30)
