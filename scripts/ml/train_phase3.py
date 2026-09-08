@@ -509,6 +509,12 @@ def main():
     print("=" * 60)
     print(f"  Device: {DEVICE}")
 
+    sig_csv = os.path.join(MODELS_DIR, 'signal_dataset.csv')
+    if not os.path.exists(sig_csv):
+        print("  WARN: signal_dataset.csv not found — skipping Phase 3 (local)")
+        print("  Existing stacking_weights.json retained.")
+        return
+
     # Prefer Phase 2c global model; fall back to Phase 1
     _p2c_global = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')
     _p1_global  = os.path.join(MODELS_DIR, 'lgbm_model.txt')

@@ -30,21 +30,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r scripts/ml/requirements.txt "kaggle>=1.8.0"
+        run: pip install -r scripts/ml/requirements.txt kaggle
 
       - name: Set up Kaggle credentials
         run: |
           mkdir -p ~/.kaggle
-          KEY="${{ secrets.KAGGLE_KEY }}"
-          if [[ "$KEY" == KGAT_* ]]; then
-            printf '{"token":"%s"}' "$KEY" > ~/.kaggle/kaggle.json
-            echo "Kaggle credentials: API token format (KGAT_...)"
-          else
-            printf '{"username":"%s","key":"%s"}' "${{ secrets.KAGGLE_USERNAME }}" "$KEY" > ~/.kaggle/kaggle.json
-            echo "Kaggle credentials: legacy key format"
-          fi
+          printf '{"username":"%s","key":"%s"}' \
+            "${{ secrets.KAGGLE_USERNAME }}" \
+            "${{ secrets.KAGGLE_KEY }}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
-          kaggle config view || true
+          echo "Kaggle version: $(kaggle --version 2>&1 || echo 'not found')"
 
       - name: Download signal dataset from Kaggle
         continue-on-error: true
