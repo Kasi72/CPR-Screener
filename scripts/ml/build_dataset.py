@@ -810,7 +810,9 @@ def main():
         'rsi_div', 'vol_accel_delta',
         'days_since_52hi', 'expiry_dist',
         'regime_stability', 'transition_risk',
-    ]  # 38 — matches Phase 2b kernel FEATURE_COLS
+        # Sprint 4: weekly CPR (added to match phase2b kernel FEATURE_COLS = 40)
+        'weekly_cpr_first_break', 'weekly_price_above_wtc',
+    ]  # 40 — matches Phase 2b kernel FEATURE_COLS
 
     P2C_BASE_COLS = [
         'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
@@ -832,7 +834,12 @@ def main():
         # Sprint 2B: structural + context
         'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
         'cpr_width_percentile_252d', 'prev_day_ochoa_type',
-    ]  # 51
+        # Sprint 3: gap + bar quality + volatility + volume structure
+        'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+        'atr_expansion', 'vol_trend_slope',
+        # Sprint 4: weekly CPR
+        'weekly_cpr_first_break', 'weekly_price_above_wtc',
+    ]  # 58 — matches Phase 2c kernel BASE_FEATURES
 
     injected = False
     try:
@@ -876,7 +883,7 @@ def main():
             'cpr_vol_interaction', 'regime_momentum', 'cpr_rsi_squeeze',
             'overlap_vol_signal', 'rs_direction_alignment',
             'virgin_momentum', 'narrow_breakout_vol',
-        ]  # 58 (51 base + 7 interactions)
+        ]  # 65 (58 base + 7 interactions)
 
         # Phase 2c global score
         p2c_path = os.path.join(MODELS_DIR, 'lgbm2c_global.txt')

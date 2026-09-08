@@ -32,7 +32,7 @@ XGB_FALLBACK= os.path.join(MODELS_DIR, 'xgb_regressor_v2.json')
 LGBM_PATH   = os.path.join(MODELS_DIR, 'lgbm_model.txt')
 META_LGBM_PATH = os.path.join(MODELS_DIR, 'meta_lgbm.txt')
 REGIME_PATHS   = {s: os.path.join(MODELS_DIR, f'lgbm_regime_{s}.txt') for s in range(4)}
-RULE_PATHS     = {i: os.path.join(MODELS_DIR, f'lgbm_rule{i}.txt') for i in range(1, 12)}
+RULE_PATHS     = {i: os.path.join(MODELS_DIR, f'lgbm_rule{i}.txt') for i in range(1, 17)}
 LSTM_PATH   = os.path.join(MODELS_DIR, 'lstm_model.pt')
 HMM_PATH    = os.path.join(MODELS_DIR, 'hmm_params.json')
 POSTERIORS_PATH = os.path.join(MODELS_DIR, 'hmm_posteriors.json')
@@ -331,7 +331,7 @@ _P2C_INTERACTION_FEATURES = [
     'narrow_breakout_vol',
 ]  # 7
 
-_P2C_ALL_FEATURES = _P2C_BASE_FEATURES + _P2C_INTERACTION_FEATURES  # 63
+_P2C_ALL_FEATURES = _P2C_BASE_FEATURES + _P2C_INTERACTION_FEATURES  # 65
 
 # Directional features: sign-flip for SELL (direction=-1). Matches score_p2c.py.
 _P2C_DIRECTIONAL = {
@@ -382,7 +382,7 @@ def _p2c_current_regime():
 
 
 def extract_features_2c(data):
-    """Build 63-feature array for Phase 2c models. Matches score_p2c.py logic exactly."""
+    """Build 65-feature array for Phase 2c models. Matches score_p2c.py logic exactly."""
     if isinstance(data, dict):
         data = [data]
 
@@ -565,7 +565,7 @@ def regime():
 def position_size():
     try:
         data   = request.json
-        # PPO was trained on 60-dim state: FEATURE_COLS(56) + [lgbm2c_score, exposure, cum_pnl, win_streak]
+        # PPO was trained on 62-dim state: FEATURE_COLS(58) + [lgbm2c_score, exposure, cum_pnl, win_streak]
         # Use extract_features_2c to get correct 56-feature order, strip the 7 interaction cols
         X_2c   = extract_features_2c(data if isinstance(data, list) else [data])
         X      = X_2c[:, :len(_P2C_BASE_FEATURES)]   # 56 base features only
