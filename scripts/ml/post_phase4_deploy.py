@@ -146,10 +146,10 @@ def git_commit_and_deploy():
         f"  sharpe_delta: {sharpe_delta}\n"
         f"  avg_size:     {avg_size}\n\n"
         f"Changes:\n"
-        f"  - lgbm2c_score replaces regime_score in PPO state (63-feat ML confidence)\n"
+        f"  - lgbm2c_score replaces regime_score in PPO state (65-feat ML confidence)\n"
         f"  - Sharpe-delta reward replaces P&L reward (rolling window 50)\n"
         f"  - 200k timesteps (up from 100k), early-stop 8 evals no improvement\n"
-        f"  - 56-feature FEATURE_COLS matches Phase 2c exactly\n\n"
+        f"  - 58-feature FEATURE_COLS matches Phase 2c exactly\n\n"
         f"Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
     )
 
@@ -159,6 +159,12 @@ def git_commit_and_deploy():
         return False
 
     log("Git commit successful.")
+
+    # Push to remote
+    log("Pushing to remote ...")
+    r = run(['git', 'push'])
+    if r.returncode != 0:
+        log("WARNING: git push failed — commit is local only.")
 
     # Vercel deploy
     log("Deploying to Vercel (--prod) ...")

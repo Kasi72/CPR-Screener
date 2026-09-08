@@ -30,7 +30,12 @@ KERNEL_SLUG  = 'drkasi/cpr-phase-2c-lgbm-signal-scorer'
 
 
 def _run(args, check=True, capture=False):
-    r = subprocess.run(args, capture_output=capture, text=True)
+    r = subprocess.run(args, capture_output=True, text=True)
+    if not capture:
+        if r.stdout:
+            print(r.stdout, end='', flush=True)
+        if r.stderr:
+            print(r.stderr, end='', flush=True)
     if check and r.returncode != 0:
         msg = (r.stderr or r.stdout or '').strip()
         raise RuntimeError(f"Command failed ({r.returncode}): {' '.join(args)}\n{msg}")
@@ -55,12 +60,17 @@ def upload_dataset():
     required = ['cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected',
                 'cpr_zone_vol_ratio', 'hmm_regime', 'hit_t3',
                 'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
-                'cpr_midpoint_trend', 'cpr_expansion_factor']
+                'cpr_midpoint_trend', 'cpr_expansion_factor',
+                # Sprint 3: gap + bar quality + volatility + volume structure
+                'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+                'atr_expansion', 'vol_trend_slope',
+                # Sprint 4: weekly CPR
+                'weekly_cpr_first_break', 'weekly_price_above_wtc']
     missing = [c for c in required if c not in sample.columns]
     if missing:
         raise ValueError(
             f'signal_dataset.csv is missing columns: {missing}\n'
-            f'Run scripts/ml/add_sprint2_features.py first to patch Sprint 2 columns.'
+            f'Run build_dataset.py first to regenerate with Sprint 3/4 columns.'
         )
     print(f'    All feature columns verified ({len(required)} checked).')
 

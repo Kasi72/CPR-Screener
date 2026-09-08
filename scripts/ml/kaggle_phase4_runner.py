@@ -28,7 +28,12 @@ KERNEL_SLUG  = 'drkasi/cpr-phase-4-ppo-position-sizing'
 
 
 def _run(args, check=True, capture=False):
-    r = subprocess.run(args, capture_output=capture, text=True)
+    r = subprocess.run(args, capture_output=True, text=True)
+    if not capture:
+        if r.stdout:
+            print(r.stdout, end='', flush=True)
+        if r.stderr:
+            print(r.stderr, end='', flush=True)
     if check and r.returncode != 0:
         msg = (r.stderr or r.stdout or '').strip()
         raise RuntimeError(f"Command failed ({r.returncode}): {' '.join(args)}\n{msg}")

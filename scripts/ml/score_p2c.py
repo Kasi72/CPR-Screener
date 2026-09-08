@@ -39,7 +39,9 @@ BASE_FEATURES = [
     # Sprint 3: gap + bar quality + volatility + volume structure
     'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
     'atr_expansion', 'vol_trend_slope',
-]  # 56
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58
 
 INTERACTION_FEATURES = [
     'cpr_vol_interaction',
@@ -51,7 +53,7 @@ INTERACTION_FEATURES = [
     'narrow_breakout_vol',
 ]  # 7
 
-FEATURE_COLS = BASE_FEATURES + INTERACTION_FEATURES  # 58 total (51 base + 7 interactions)
+FEATURE_COLS = BASE_FEATURES + INTERACTION_FEATURES  # 65 total (58 base + 7 interactions)
 
 DIRECTIONAL_FEATURES = {
     'dist_hi52', 'dist_lo52', 'vwap_dist', 'ema200_dist',
@@ -94,7 +96,7 @@ def main():
     print(f"  Existing lgbm2c_score coverage: {existing_coverage:.1%}")
 
     # Compute interaction features
-    print("  Computing 5 interaction features ...")
+    print("  Computing 7 interaction features ...")
     df = compute_interactions(df)
 
     # Validate all features present
