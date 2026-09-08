@@ -66,7 +66,8 @@ def asymmetric_exit(direction, entry, fh, fl, fc):
     return direction * (fc[-1] - entry) / entry if len(fc) > 0 else 0.0
 
 
-def check_rules(cpr, prev_close, cur_close, ph, pl, vwap, cam):
+def check_rules(cpr, prev_close, cur_close, ph, pl, vwap, cam,
+                prev_vwap=None, hmm_regime=-1):
     R = {}
     s3_in = cpr['lower'] <= cam['s3'] <= cpr['upper']
     r3_in = cpr['lower'] <= cam['r3'] <= cpr['upper']
@@ -74,19 +75,26 @@ def check_rules(cpr, prev_close, cur_close, ph, pl, vwap, cam):
     R['rule2']  = cpr['width_pct'] < 0.5
     R['rule3']  = prev_close < cpr['upper'] and cur_close > cpr['upper']
     R['rule4']  = ph < cpr['lower'] or pl > cpr['upper']
-    margin      = max(cpr['width'] * 0.5, cpr['pivot'] * 0.002)
-    R['rule5']  = (cpr['lower'] - margin) <= vwap <= (cpr['upper'] + margin)
-    safe        = cur_close if cur_close > 0 else 1
-    nr3 = abs(cur_close - cam['r3']) / safe < 0.005
-    ns3 = abs(cur_close - cam['s3']) / safe < 0.005
-    R['rule6']  = cpr['width_pct'] > 0.7 and (nr3 or ns3)
+    # rule5: VWAP crossing CPR boundary (directional signal, not "VWAP inside CPR" state)
+    if prev_vwap is not None:
+        vwap_cross_up   = prev_vwap < cpr['lower'] and vwap >= cpr['lower']
+        vwap_cross_down = prev_vwap > cpr['upper'] and vwap <= cpr['upper']
+        R['rule5'] = vwap_cross_up or vwap_cross_down
+    else:
+        R['rule5'] = False
+    # rule6: dropped — negative Sharpe (-1.61), confirmed losing strategy
+    R['rule6']  = False
     rs  = (prev_close > cpr['upper'] and cur_close > cpr['upper'] and
            (cur_close - cpr['upper']) / cpr['upper'] < 0.012)
     rr  = (prev_close < cpr['lower'] and cur_close < cpr['lower'] and
            (cpr['lower'] - cur_close) / cpr['lower'] < 0.012)
     R['rule7']  = rs or rr
     R['rule8']  = (cur_close > cpr['upper'] and ph > cpr['upper'])
-    R['rule9']  = cpr['pivot'] > 0 and abs(cur_close - cpr['pivot']) / cpr['pivot'] > 0.02
+    # rule9: mean-reversion only valid in range-bound regimes (HMM 0 or 1)
+    # trending regimes (2/3) destroy mean-reversion edge
+    R['rule9']  = (cpr['pivot'] > 0
+                   and abs(cur_close - cpr['pivot']) / cpr['pivot'] > 0.02
+                   and hmm_regime in (0, 1))
     ht = cpr['upper'] > 0 and abs(ph - cpr['upper']) / cpr['upper'] < 0.005
     lt = cpr['lower'] > 0 and abs(pl - cpr['lower']) / cpr['lower'] < 0.005
     R['rule10'] = ht or lt
@@ -95,11 +103,16 @@ def check_rules(cpr, prev_close, cur_close, ph, pl, vwap, cam):
     return R
 
 
-def get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl):
+def get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl, prev_vwap=None, vwap=None):
     safe = cur_close if cur_close > 0 else 1
     if rid == 'rule3':  return 1
     if rid == 'rule4':  return 1 if pl > cpr['upper'] else -1
-    if rid == 'rule6':  return -1 if abs(cur_close - cam['r3']) / safe < 0.005 else 1
+    if rid == 'rule5':
+        # Cross up through BC = VWAP reclaim = long; cross down through TC = short
+        if prev_vwap is not None and vwap is not None:
+            return 1 if prev_vwap < cpr['lower'] else -1
+        return 1
+    if rid == 'rule6':  return 1  # dropped — will never fire
     if rid == 'rule7':  return 1 if prev_close > cpr['upper'] else -1
     if rid == 'rule8':  return 1 if cur_close > cpr['upper'] else -1
     if rid == 'rule9':  return -1 if cur_close > cpr['pivot'] else 1
@@ -112,7 +125,8 @@ def get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl):
 def build_signals_for_symbol(sym, df_sym, sector_closes=None,
                               delivery_pivot=None, pcr_pivot=None,
                               market_pcr=None,
-                              vix_dict=None, sector_ticker='^NSEI'):
+                              vix_dict=None, sector_ticker='^NSEI',
+                              regime_map=None):
     df  = df_sym.sort_index().copy()
     if len(df) < MIN_BARS:
         return []
@@ -153,8 +167,20 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
         vwap_vals  = calc_vwap(opens[:i+1], highs[:i+1], lows[:i+1],
                                 closes[:i+1], volumes[:i+1])
         vwap_cur   = vwap_vals[-1]
+        vwap_prev  = vwap_vals[-2] if len(vwap_vals) >= 2 else vwap_cur
 
-        rules_fired = check_rules(cpr, prev_close, cur_close, ph, pl, vwap_cur, cam)
+        # HMM regime lookup for rule9 gate
+        if regime_map is not None:
+            try:
+                bar_dt     = pd.Timestamp(dates[i]).normalize()
+                bar_regime = int(regime_map.asof(bar_dt))
+            except Exception:
+                bar_regime = -1
+        else:
+            bar_regime = -1
+
+        rules_fired = check_rules(cpr, prev_close, cur_close, ph, pl, vwap_cur, cam,
+                                  prev_vwap=vwap_prev, hmm_regime=bar_regime)
         fired = [k for k, v in rules_fired.items() if v]
         if not fired:
             continue
@@ -442,7 +468,8 @@ def build_signals_for_symbol(sym, df_sym, sector_closes=None,
             prev_day_ochoa_type = 1
 
         for rid in fired:
-            direction  = get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl)
+            direction  = get_direction(rid, cpr, cam, cur_close, prev_close, ph, pl,
+                                       prev_vwap=vwap_prev, vwap=vwap_cur)
             # Tier 1 interaction features that depend on direction
             rsi_dir  = rsi_val * direction
             hi52_dir = dist_hi52 * direction
@@ -635,7 +662,8 @@ def main():
                                           delivery_pivot=delivery_pivot,
                                           pcr_pivot=pcr_pivot,
                                           market_pcr=market_pcr,
-                                          vix_dict=vix_dict)
+                                          vix_dict=vix_dict,
+                                          regime_map=regime_map)
         if not rows:
             continue
 
