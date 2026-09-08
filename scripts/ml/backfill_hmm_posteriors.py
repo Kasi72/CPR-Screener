@@ -100,15 +100,18 @@ def fit_hmm_extended(start='2018-01-01'):
     print(f"  Posteriors cover {len(posterior_by_date)} dates "
           f"({min(posterior_by_date)} to {max(posterior_by_date)})")
 
-    # Regime stability + transition risk per date (same as train_phase1.py)
-    transmat   = best_model.transmat_
+    # Regime stability + transition risk per date (posterior-based, matches build_dataset.py)
+    # regime_stability = max(posterior_probs)  range [0.25, 1.0] for 4 states
+    # transition_risk  = normalized entropy H/log(4)  range [0=certain, 1=max uncertainty]
+    _log_n = np.log(4)
     regime_stability_by_date = {}
     transition_risk_by_date  = {}
-    for date_str, s in state_by_date.items():
-        self_loop              = float(transmat[s, s])
-        max_other              = float(max(transmat[s, j] for j in range(4) if j != s))
-        regime_stability_by_date[date_str] = round(self_loop, 6)
-        transition_risk_by_date[date_str]  = round(max_other,  6)
+    for i, date_str in enumerate(state_by_date.keys()):
+        post = posteriors[i]
+        stability = float(post.max())
+        entropy   = float(-np.sum(post * np.log(np.clip(post, 1e-9, 1))) / _log_n)
+        regime_stability_by_date[date_str] = round(stability, 6)
+        transition_risk_by_date[date_str]  = round(entropy,   6)
 
     # Build hmm_params.json (compatible with JS Viterbi + predict_server.py)
     params = {

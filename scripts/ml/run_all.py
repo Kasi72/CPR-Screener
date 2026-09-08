@@ -21,10 +21,10 @@ Phase 2b/2c/3/4 Kaggle flags:
     --local-phase3               Force local CPU training for Phase 3
     --local-phase4               Force local CPU training for Phase 4
     --skip-upload                Re-use existing Kaggle dataset for Phase 3
-    --timeout-minutes N          Kaggle poll timeout for Phase 3 (default: 120)
-    --p4-timeout-minutes N       Kaggle poll timeout for Phase 4 (default: 60)
-    --p2b-timeout-minutes N      Kaggle poll timeout for Phase 2b (default: 90)
-    --p2c-timeout-minutes N      Kaggle poll timeout for Phase 2c (default: 120)
+    --timeout-minutes=N          Kaggle poll timeout for Phase 3 (default: 120)
+    --p4-timeout-minutes=N       Kaggle poll timeout for Phase 4 (default: 60)
+    --p2b-timeout-minutes=N      Kaggle poll timeout for Phase 2b (default: 90)
+    --p2c-timeout-minutes=N      Kaggle poll timeout for Phase 2c (default: 120)
 """
 
 import subprocess, sys, os, time, shutil

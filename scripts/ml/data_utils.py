@@ -38,37 +38,51 @@ FEATURE_COLS = [
     # Phase D: options put-call ratio (institutional hedging signal)
     'pcr',
     # Tier 1: VIX + interaction features
-    'india_vix',    # market fear level (high VIX = avoid long, signals weaker)
-    'conf_vol',     # n_rules_fired × vol_accel (confluence strength × volume surge)
-    'rsi_dir',      # rsi14 × direction (RSI alignment: overbought long = bad)
-    'hi52_dir',     # dist_hi52 × direction (52w proximity × signal direction)
+    'india_vix',         # market fear level
+    'conf_vol',          # n_rules_fired × vol_accel
+    'rsi_dir',           # rsi14 × direction
+    'hi52_dir',          # dist_hi52 × direction
     # Tier 2A: CPR quality
-    'cpr_compress', # today CPR width / 5d avg (< 1 = squeezing → breakout setup)
-    'cpr_pos',      # (close - cpr_lower) / cpr_width clipped [0,1]
-    'dist_r1',      # (close - R1) / close — negative = below R1, room to run
-    'dist_s1',      # (close - S1) / close — positive = above S1, support confirmed
+    'cpr_compress',      # today CPR width / 5d avg
+    'cpr_pos',           # (close - cpr_lower) / cpr_width clipped [0,1]
+    'dist_r1',           # (close - R1) / close
+    'dist_s1',           # (close - S1) / close
     # Tier 2B: multi-timeframe momentum
-    'mom3',         # 3-day return
-    'mom10',        # 10-day return
-    'mom20',        # 20-day return
+    'mom3', 'mom10', 'mom20',
     # Tier 2C: divergence + volume curvature
-    'rsi_div',      # +1=bullish div, -1=bearish div, 0=none
-    'vol_accel_delta', # vol_accel today − vol_accel yesterday
+    'rsi_div', 'vol_accel_delta',
     # Tier 2D: context
-    'days_since_52hi', # days since last 52-week high (momentum age, capped 252)
-    'expiry_dist',  # calendar days to next monthly F&O expiry
-    # HMM regime quality (joined at training from posteriors, not in signal CSV)
-    'regime_stability', # max_post_today − max_post_yesterday
-    'transition_risk',  # 1 − max_posterior (probability of NOT being in dominant regime)
+    'days_since_52hi', 'expiry_dist',
+    # Sprint 1: CPR zone quality features
+    'cpr_overlap_pct',       # daily CPR overlap with prior CPR (support zone quality)
+    'open_to_cpr_dist',      # open vs CPR pivot distance / ATR (entry proximity)
+    'prev_cpr_respected',    # 1 if prior day CPR held as support/resistance
+    'cpr_zone_vol_ratio',    # vol in CPR band vs total vol (zone conviction)
+    'hmm_regime',            # HMM market regime 0-3 (-1 if absent)
+    # Sprint 2A: CPR compression + structure
+    'open_inside_cpr',           # open printed inside CPR range
+    'cpr_virgin',                # CPR not yet tested today (first break = strongest)
+    'consecutive_narrow_cprs',   # streak of progressively narrower CPRs (squeeze)
+    'cpr_midpoint_trend',        # slope of 5d CPR midpoint (trending structure)
+    'cpr_expansion_factor',      # today CPR width / prior CPR width
+    # Sprint 2B: structural + context CPR features
+    'cpr_above_prev_cpr',        # today CPR above yesterday's (bullish structure)
+    'prev_close_inside_cpr',     # prev close inside CPR (indecision carry-through)
+    'atr_to_cpr_ratio',          # ATR / CPR width (breakout range potential)
+    'cpr_width_percentile_252d', # CPR width rank over 252d (relative compression)
+    'prev_day_ochoa_type',       # yesterday's OCHOA candle type
     # Sprint 3: gap + bar quality + volatility + volume structure
-    'gap_pct',            # today's open vs prev close (gap direction = continuation)
-    'cpr_test_count_5d',  # how many last 5 bars tested CPR (magnetism / support quality)
-    'prev_bar_close_pos', # yesterday's close position in H-L range [0=low, 1=high]
-    'atr_expansion',      # ATR today / 5d avg ATR (>1 = expanding volatility)
-    'vol_trend_slope',    # 5-day volume slope / avg (positive = volume building)
-]
+    'gap_pct',            # today open vs prev close / prev close
+    'cpr_test_count_5d',  # how many last 5 bars tested CPR
+    'prev_bar_close_pos', # yesterday close position in H-L range [0=low, 1=high]
+    'atr_expansion',      # ATR today / 5d avg ATR
+    'vol_trend_slope',    # 5-day volume slope / avg
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break',  # first break of weekly CPR this week
+    'weekly_price_above_wtc',  # price above weekly top-of-CPR (TC)
+]  # 58 — matches Phase 2c BASE_FEATURES and Phase 4 FEATURE_COLS exactly
 
-# Monotone constraints aligned with FEATURE_COLS (43 features).
+# Monotone constraints aligned with FEATURE_COLS (58 features).
 # +1 = feature↑ → win rate↑  |  -1 = feature↑ → win rate↓  |  0 = no constraint
 MONOTONE_CONSTRAINTS = [
     0,   # cpr_width_pct
@@ -96,7 +110,7 @@ MONOTONE_CONSTRAINTS = [
     1,   # conf_vol: confluence × volume → better
    -1,   # rsi_dir: overbought long / oversold short → worse
     0,   # hi52_dir
-    0,   # cpr_compress: nonlinear effect, no monotone direction enforced
+    0,   # cpr_compress: nonlinear, no monotone direction
     0,   # cpr_pos
     0,   # dist_r1
     0,   # dist_s1
@@ -107,14 +121,34 @@ MONOTONE_CONSTRAINTS = [
     1,   # vol_accel_delta: accelerating volume surge → better
     0,   # days_since_52hi
     0,   # expiry_dist
-    1,   # regime_stability: more stable regime → better signal quality
-   -1,   # transition_risk: more uncertainty → worse signal quality
-    0,   # gap_pct: nonlinear (gap-up good for longs, bad for shorts — model learns)
-    1,   # cpr_test_count_5d: more CPR tests → stronger support/resistance level
+    # Sprint 1
+    1,   # cpr_overlap_pct: more overlap = stronger CPR zone = better signal quality
+    0,   # open_to_cpr_dist: direction-dependent, model learns
+    1,   # prev_cpr_respected: confirmed zone → better setup
+    1,   # cpr_zone_vol_ratio: more zone vol = stronger conviction
+    0,   # hmm_regime: 0-3 ordinal, not monotone
+    # Sprint 2A
+    0,   # open_inside_cpr: ambiguous (inside = indecision)
+    1,   # cpr_virgin: untested CPR → stronger first-break setup
+    1,   # consecutive_narrow_cprs: tighter squeeze → bigger breakout potential
+    0,   # cpr_midpoint_trend: direction-dependent
+    0,   # cpr_expansion_factor: nonlinear effect
+    # Sprint 2B
+    1,   # cpr_above_prev_cpr: bullish structure for longs
+    0,   # prev_close_inside_cpr: indecision signal, ambiguous
+    0,   # atr_to_cpr_ratio: high = more range but also more risk
+    0,   # cpr_width_percentile_252d: context-dependent
+    0,   # prev_day_ochoa_type: categorical, nonlinear
+    # Sprint 3
+    0,   # gap_pct: direction-dependent (gap-up good for long, bad for short)
+    1,   # cpr_test_count_5d: more tests → stronger zone
     1,   # prev_bar_close_pos: closed near high → bullish carry-through
-    0,   # atr_expansion: expanding ATR = more range, model learns direction
+    0,   # atr_expansion: expanding = more range, model learns direction
     1,   # vol_trend_slope: volume building = breakout confirmation
-]
+    # Sprint 4
+    1,   # weekly_cpr_first_break: momentum signal
+    1,   # weekly_price_above_wtc: bullish weekly structure
+]  # 58 — must match FEATURE_COLS length
 
 SEQUENCE_COLS = ['ret', 'hl_range', 'vol_ratio', 'rsi14', 'sg_vel', 'mom5']
 
@@ -214,9 +248,9 @@ def calc_vwap(opens, highs, lows, closes, volumes):
 # ── 3. FEATURE API ────────────────────────────────────────────────────────────
 
 def build_features(row: dict, rule_map: Optional[dict] = None) -> dict:
-    """Convert a signal row dict to the 43-feature vector dict (FEATURE_COLS order)."""
+    """Convert a signal row dict to the 58-feature vector dict (FEATURE_COLS order)."""
     if rule_map is None:
-        rule_map = {f'rule{i}': i for i in range(1, 12)}
+        rule_map = {f'rule{i}': i for i in range(1, 17)}  # rules 1–16
     return {
         # original 12
         'cpr_width_pct': float(row.get('cpr_width_pct', 0)),
@@ -264,15 +298,33 @@ def build_features(row: dict, rule_map: Optional[dict] = None) -> dict:
         # Tier 2D: context
         'days_since_52hi': float(row.get('days_since_52hi', 90.0)),
         'expiry_dist':   float(row.get('expiry_dist', 15.0)),
-        # HMM regime quality (0 = neutral defaults at inference)
-        'regime_stability': float(row.get('regime_stability', 0.0)),
-        'transition_risk':  float(row.get('transition_risk', 0.25)),
+        # Sprint 1: CPR zone quality
+        'cpr_overlap_pct':    float(row.get('cpr_overlap_pct', 0.0)),
+        'open_to_cpr_dist':   float(row.get('open_to_cpr_dist', 0.0)),
+        'prev_cpr_respected': float(row.get('prev_cpr_respected', 0.0)),
+        'cpr_zone_vol_ratio': float(row.get('cpr_zone_vol_ratio', 1.0)),
+        'hmm_regime':         float(row.get('hmm_regime', -1)),
+        # Sprint 2A: CPR compression + structure
+        'open_inside_cpr':          float(row.get('open_inside_cpr', 0.0)),
+        'cpr_virgin':               float(row.get('cpr_virgin', 1.0)),
+        'consecutive_narrow_cprs':  float(row.get('consecutive_narrow_cprs', 0.0)),
+        'cpr_midpoint_trend':       float(row.get('cpr_midpoint_trend', 0.0)),
+        'cpr_expansion_factor':     float(row.get('cpr_expansion_factor', 1.0)),
+        # Sprint 2B: structural + context CPR features
+        'cpr_above_prev_cpr':        float(row.get('cpr_above_prev_cpr', 0.0)),
+        'prev_close_inside_cpr':     float(row.get('prev_close_inside_cpr', 0.0)),
+        'atr_to_cpr_ratio':          float(row.get('atr_to_cpr_ratio', 1.0)),
+        'cpr_width_percentile_252d': float(row.get('cpr_width_percentile_252d', 0.5)),
+        'prev_day_ochoa_type':       float(row.get('prev_day_ochoa_type', 0.0)),
         # Sprint 3: gap + bar quality + volatility + volume structure
         'gap_pct':            float(row.get('gap_pct', 0.0)),
         'cpr_test_count_5d':  float(row.get('cpr_test_count_5d', 0)),
         'prev_bar_close_pos': float(row.get('prev_bar_close_pos', 0.5)),
         'atr_expansion':      float(row.get('atr_expansion', 1.0)),
         'vol_trend_slope':    float(row.get('vol_trend_slope', 0.0)),
+        # Sprint 4: weekly CPR features
+        'weekly_cpr_first_break': float(row.get('weekly_cpr_first_break', 0.0)),
+        'weekly_price_above_wtc': float(row.get('weekly_price_above_wtc', 0.0)),
     }
 
 

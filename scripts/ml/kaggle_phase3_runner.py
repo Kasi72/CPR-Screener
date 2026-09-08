@@ -38,7 +38,12 @@ SIGNAL_CSV     = os.path.join(MODELS_DIR, 'signal_dataset.csv')
 # ── Subprocess helper ─────────────────────────────────────────────────────────
 
 def _run(args, check=True, capture=False):
-    r = subprocess.run(args, capture_output=capture, text=True)
+    r = subprocess.run(args, capture_output=True, text=True)
+    if not capture:
+        if r.stdout:
+            print(r.stdout, end='', flush=True)
+        if r.stderr:
+            print(r.stderr, end='', flush=True)
     if check and r.returncode != 0:
         msg = (r.stderr or r.stdout or '').strip()
         raise RuntimeError(f"Command failed ({r.returncode}): {' '.join(args)}\n{msg}")
@@ -95,7 +100,7 @@ def package_inputs(staging_dir, skip_ohlcv=False):
          'lgbm2c_global.txt', 'phase2c_metrics.json', 'shap_weights2c.json']
         + [f'lgbm_regime_{s}.txt'  for s in range(4)]   # Phase 1 fallback
         + [f'lgbm2c_regime_{s}.txt' for s in range(4)]  # Phase 2c preferred
-        + [f'lgbm_rule{i}.txt'     for i in range(1, 12)]
+        + [f'lgbm_rule{i}.txt'     for i in range(1, 17)]
     )
     copied = []
     for fn in model_files:

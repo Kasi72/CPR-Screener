@@ -44,7 +44,7 @@ class SignalSizingEnv(gym.Env):
              + 0.1 * (reward > 0)        (win bonus)
     """
     ACTION_SIZES  = np.array([0.0, 0.25, 0.50, 0.75, 1.00])
-    STATE_DIM     = len(FEATURE_COLS) + 4   # 25 features + regime + exposure + sharpe + streak = 29
+    STATE_DIM     = len(FEATURE_COLS) + 4   # 58 features + lgbm2c_score + exposure + sharpe + win_streak = 62
 
     def __init__(self, signals_df, mode='train'):
         super().__init__()

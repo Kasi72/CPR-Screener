@@ -1,7 +1,7 @@
 """
 cpr_phase2b_kernel.py — Phase 2b: LightGBM + Optuna HPO Signal Scorer
 
-Reads from /kaggle/input/cpr-screener-phase4-inputs/:
+Reads from /kaggle/input/cpr-screener-phase2b-inputs/:
   signal_dataset.csv
 
 Writes to /kaggle/working/:

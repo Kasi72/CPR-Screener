@@ -30,15 +30,14 @@ KERNEL_SLUG  = 'drkasi/cpr-phase-2b-lightgbm-hpo-signal-scorer'
 
 def _run(args, check=True, capture=False):
     r = subprocess.run(args, capture_output=True, text=True)
-    if r.stdout:
-        print(r.stdout, end='')
-    if r.stderr:
-        print(r.stderr, end='', file=sys.stderr)
+    if not capture:
+        if r.stdout:
+            print(r.stdout, end='', flush=True)
+        if r.stderr:
+            print(r.stderr, end='', flush=True)
     if check and r.returncode != 0:
         msg = (r.stderr or r.stdout or '').strip()
         raise RuntimeError(f"Command failed ({r.returncode}): {' '.join(args)}\n{msg}")
-    if not capture:
-        return r
     return r
 
 
@@ -47,9 +46,36 @@ def _kaggle(*args, capture=False):
 
 
 def upload_dataset():
-    print('  [1/5] Uploading signal_dataset.csv to Kaggle ...')
+    print('  [1/5] Uploading signal_dataset.csv to Phase 2b dataset ...')
     if not os.path.exists(SIGNAL_CSV):
         raise FileNotFoundError(f'signal_dataset.csv not found at {SIGNAL_CSV}')
+
+    # Validate all Phase 2b FEATURE_COLS are present before upload
+    import pandas as pd
+    sample = pd.read_csv(SIGNAL_CSV, nrows=5)
+    required = [
+        'cpr_width_pct', 'vwap_dist', 'atr_pct_rank', 'vol_rank',
+        'n_rules_fired', 'sg_vel', 'ema200_dist', 'rsi14',
+        'mom5', 'dow', 'rule_id', 'direction',
+        'dist_hi52', 'dist_lo52', 'vol_accel',
+        'market_rs_5d', 'market_rs_20d', 'sector_rs_5d', 'sector_rs_20d',
+        'deliv_pct', 'pcr', 'india_vix',
+        'conf_vol', 'rsi_dir', 'hi52_dir',
+        'cpr_compress', 'cpr_pos', 'dist_r1', 'dist_s1',
+        'mom3', 'mom10', 'mom20',
+        'rsi_div', 'vol_accel_delta',
+        'days_since_52hi', 'expiry_dist',
+        'regime_stability', 'transition_risk',
+        # Sprint 4: weekly CPR
+        'weekly_cpr_first_break', 'weekly_price_above_wtc',
+    ]  # 40 — Phase 2b FEATURE_COLS
+    missing = [c for c in required if c not in sample.columns]
+    if missing:
+        raise ValueError(
+            f'signal_dataset.csv missing Phase 2b columns: {missing}\n'
+            f'Run build_dataset.py first to regenerate.'
+        )
+    print(f'    All {len(required)} Phase 2b feature columns verified.')
 
     staging = tempfile.mkdtemp(prefix='kaggle_p2b_stage_')
     try:

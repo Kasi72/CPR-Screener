@@ -730,20 +730,44 @@ def main():
 
     # --- Sprint 1: load HMM posteriors once for regime assignment ---
     posteriors_path = os.path.join(MODELS_DIR, 'hmm_posteriors.json')
-    regime_map = {}
+    regime_map = None
+    stability_map = None  # max(posterior) — HMM certainty score [0.25, 1.0]
+    risk_map = None       # normalized entropy — [0=certain, 1=max uncertainty]
     if os.path.exists(posteriors_path):
         with open(posteriors_path) as f:
             posteriors = json.load(f)
+
+        _dates = list(posteriors.keys())
+        _probs = [np.array(v, dtype=np.float32) for v in posteriors.values()]
+        _n_states = _probs[0].shape[0] if _probs else 4
+        _log_n = np.log(_n_states)
+
         _regime_series = pd.Series(
-            {d: int(np.argmax(v)) for d, v in posteriors.items()},
+            {d: int(np.argmax(v)) for d, v in zip(_dates, _probs)},
             dtype='int8',
         )
-        _regime_series.index = pd.to_datetime(_regime_series.index)
-        _regime_series = _regime_series.sort_index()
-        regime_map = _regime_series   # pd.Series for ffill lookup below
-        print(f"  HMM posteriors loaded: {len(regime_map)} dates")
+        _stability_series = pd.Series(
+            {d: float(v.max()) for d, v in zip(_dates, _probs)},
+            dtype='float32',
+        )
+        # normalized entropy: 0 = fully certain, 1 = uniform (max uncertainty)
+        _risk_series = pd.Series(
+            {d: float(-np.sum(v * np.log(np.clip(v, 1e-9, 1))) / _log_n)
+             for d, v in zip(_dates, _probs)},
+            dtype='float32',
+        )
+
+        for s in (_regime_series, _stability_series, _risk_series):
+            s.index = pd.to_datetime(s.index)
+            s.sort_index(inplace=True)
+
+        regime_map    = _regime_series
+        stability_map = _stability_series
+        risk_map      = _risk_series
+        print(f"  HMM posteriors loaded: {len(regime_map)} dates  "
+              f"(stability mean={_stability_series.mean():.3f}  "
+              f"risk mean={_risk_series.mean():.3f})")
     else:
-        regime_map = None
         print("  hmm_posteriors.json not found — hmm_regime = -1 (neutral).")
 
     # Stream rows directly to CSV to avoid accumulating 1.4M dicts in RAM
@@ -769,13 +793,24 @@ def main():
         chunk = pd.DataFrame(rows)
         if regime_map is not None:
             dates_dt = pd.to_datetime(chunk['date'])
+            _tol = pd.Timedelta('5D')
             # reindex to signal dates; ffill fills yfinance gaps (max 5 days)
             chunk['hmm_regime'] = (
-                regime_map.reindex(dates_dt, method='ffill', tolerance=pd.Timedelta('5D'))
+                regime_map.reindex(dates_dt, method='ffill', tolerance=_tol)
                 .fillna(-1).astype(int).values
             )
+            chunk['regime_stability'] = (
+                stability_map.reindex(dates_dt, method='ffill', tolerance=_tol)
+                .fillna(0.25).astype(np.float32).values  # 0.25 = uniform (4 states)
+            )
+            chunk['transition_risk'] = (
+                risk_map.reindex(dates_dt, method='ffill', tolerance=_tol)
+                .fillna(1.0).astype(np.float32).values   # 1.0 = max uncertainty
+            )
         else:
-            chunk['hmm_regime'] = -1
+            chunk['hmm_regime']       = -1
+            chunk['regime_stability'] = 0.25   # unknown → uniform prior
+            chunk['transition_risk']  = 1.0    # unknown → max uncertainty
 
         chunk.to_csv(out, mode='w' if not header_done else 'a',
                      header=not header_done, index=False)

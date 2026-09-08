@@ -57,8 +57,9 @@ def upload_dataset():
     # Validate Sprint 1 columns are present
     import pandas as pd
     sample = pd.read_csv(SIGNAL_CSV, nrows=5)
-    required = ['cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected',
-                'cpr_zone_vol_ratio', 'hmm_regime', 'hit_t3',
+    required = ['hmm_regime',  # regime=-1 for all rows = silent regime model failure
+                'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected',
+                'cpr_zone_vol_ratio', 'hit_t3',
                 'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
                 'cpr_midpoint_trend', 'cpr_expansion_factor',
                 # Sprint 3: gap + bar quality + volatility + volume structure

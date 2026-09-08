@@ -86,29 +86,33 @@ def stacking_ensemble(
 def ppo_position_size(
     features_row: np.ndarray,
     ppo_weights: Optional[dict],
-    regime_score: float = 0.5,
+    lgbm2c_score: float = 0.5,
 ) -> float:
     """
     Map a feature row to a discrete position size in ACTION_SIZES.
 
     Uses exported PPO policy first layer as a linear approximation.
     Falls back to n_rules_fired heuristic if weights unavailable.
+
+    State layout (62-dim): [58 signal features | lgbm2c_score | exposure | sharpe | win_streak]
+    Exposure/sharpe/win_streak default to 0 — live portfolio state not tracked here.
     """
     if not ppo_weights:
         score = float(features_row[4]) / 10.0   # n_rules_fired index
-        score = float(np.clip(score, 0, 1)) * regime_score
+        score = float(np.clip(score, 0, 1)) * lgbm2c_score
         return ACTION_SIZES[min(int(score * 4), 4)]
 
     W0_data = ppo_weights.get('mlp_extractor.policy_net.0.weight')
     if W0_data is None:
         return ACTION_SIZES[2]  # default 50%
 
-    W0 = np.array(W0_data, dtype=np.float32)          # [128, input_dim]
+    W0 = np.array(W0_data, dtype=np.float32)          # [128, 62]
     x  = np.zeros(W0.shape[1], dtype=np.float32)
     n_feat = min(len(features_row), W0.shape[1] - 4)
     x[:n_feat] = features_row[:n_feat]
     if W0.shape[1] >= 4:
-        x[-4] = regime_score  # regime at index -4 matches PPO state layout
+        # PPO state: [58 signal features | lgbm2c_score | exposure | sharpe | win_streak]
+        x[-4] = lgbm2c_score  # slot 58 = lgbm2c_score (ML confidence from Phase 2c)
     b0 = np.array(ppo_weights.get('mlp_extractor.policy_net.0.bias',
                                    np.zeros(W0.shape[0])), dtype=np.float32)
     h = np.maximum(0, W0 @ x + b0)
