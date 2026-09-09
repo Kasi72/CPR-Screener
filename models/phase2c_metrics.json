@@ -1,7 +1,7 @@
 {
   "target": "hit_t1",
-  "n_rows": 1394131,
-  "n_features": 63,
+  "n_rows": 1335327,
+  "n_features": 65,
   "feature_cols": [
     "cpr_width_pct",
     "vwap_dist",
@@ -59,6 +59,8 @@
     "prev_bar_close_pos",
     "atr_expansion",
     "vol_trend_slope",
+    "weekly_cpr_first_break",
+    "weekly_price_above_wtc",
     "cpr_vol_interaction",
     "regime_momentum",
     "cpr_rsi_squeeze",
@@ -70,62 +72,62 @@
   "regimes": {
     "0": {
       "status": "trained",
-      "n_total": 430616,
-      "n_train": 301431,
-      "n_val": 64592,
-      "n_test": 64593,
-      "pos_weight": 2.168,
-      "cv_auc": 0.6107,
-      "val_auc": 0.5864,
-      "test_auc": 0.5885
+      "n_total": 435034,
+      "n_train": 304523,
+      "n_val": 65255,
+      "n_test": 65256,
+      "pos_weight": 2.163,
+      "cv_auc": 0.6062,
+      "val_auc": 0.5865,
+      "test_auc": 0.5768
     },
     "1": {
       "status": "trained",
-      "n_total": 329357,
-      "n_train": 230549,
-      "n_val": 49403,
-      "n_test": 49405,
-      "pos_weight": 2.127,
-      "cv_auc": 0.6298,
-      "val_auc": 0.6175,
-      "test_auc": 0.6136
+      "n_total": 331533,
+      "n_train": 232073,
+      "n_val": 49729,
+      "n_test": 49731,
+      "pos_weight": 2.119,
+      "cv_auc": 0.6317,
+      "val_auc": 0.612,
+      "test_auc": 0.6155
     },
     "2": {
       "status": "trained",
-      "n_total": 522271,
-      "n_train": 365589,
-      "n_val": 78340,
-      "n_test": 78342,
-      "pos_weight": 2.714,
-      "cv_auc": 0.6223,
-      "val_auc": 0.5938,
-      "test_auc": 0.6225
+      "n_total": 474811,
+      "n_train": 332367,
+      "n_val": 71221,
+      "n_test": 71223,
+      "pos_weight": 2.866,
+      "cv_auc": 0.619,
+      "val_auc": 0.5932,
+      "test_auc": 0.6156
     },
     "3": {
       "status": "trained",
-      "n_total": 111887,
-      "n_train": 78320,
-      "n_val": 16783,
-      "n_test": 16784,
-      "pos_weight": 2.044,
-      "cv_auc": 0.5784,
-      "val_auc": 0.5858,
-      "test_auc": 0.5845
+      "n_total": 93949,
+      "n_train": 65764,
+      "n_val": 14092,
+      "n_test": 14093,
+      "pos_weight": 2.14,
+      "cv_auc": 0.5869,
+      "val_auc": 0.6265,
+      "test_auc": 0.5726
     }
   },
-  "best_cv_auc_global": 0.6297,
-  "final_val_auc_global": 0.6184,
-  "test_auc_global": 0.6112,
+  "best_cv_auc_global": 0.6237,
+  "final_val_auc_global": 0.6171,
+  "test_auc_global": 0.6168,
   "best_params_global": {
-    "learning_rate": 0.01831570658384773,
-    "num_leaves": 194,
+    "learning_rate": 0.023078445613400767,
+    "num_leaves": 77,
     "max_depth": 10,
-    "min_child_samples": 67,
-    "feature_fraction": 0.5137876474919654,
-    "bagging_fraction": 0.4674624292883394,
-    "bagging_freq": 4,
-    "reg_alpha": 0.006575933391496947,
-    "reg_lambda": 0.0007355706724209493
+    "min_child_samples": 92,
+    "feature_fraction": 0.4508363049813655,
+    "bagging_fraction": 0.42117966737711887,
+    "bagging_freq": 7,
+    "reg_alpha": 5.447286276477221,
+    "reg_lambda": 0.0005555725785070786
   },
-  "runtime_min": 193.48
+  "runtime_min": 186.16
 }
