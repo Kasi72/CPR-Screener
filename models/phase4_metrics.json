@@ -1,7 +1,7 @@
 {
-  "sharpe_full": -3.3372,
-  "sharpe_ppo": -3.3749,
-  "sharpe_delta": -0.0376,
-  "avg_size": 0.725,
-  "n_test": 209121
+  "sharpe_full": -3.3573,
+  "sharpe_ppo": 0.9115,
+  "sharpe_delta": 4.2688,
+  "avg_size": 0.2279,
+  "n_test": 200300
 }
