@@ -663,14 +663,18 @@ const MFE_MAE_PARAMS = MFE_MAE_PARAMS_ALL['swing'];
 
 // ─── XGB PREDICTION CLIENT ────────────────────────────────────────────────────
 
-const XGB_URL = 'http://127.0.0.1:5001/predict';
+// PREDICT_SERVER_URL: set in Vercel env vars to a Cloudflare Tunnel URL
+// (run: cloudflared tunnel --url http://localhost:5001)
+// Locally defaults to http://127.0.0.1:5001
+const PREDICT_BASE = (process.env.PREDICT_SERVER_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+const XGB_URL = `${PREDICT_BASE}/predict`;
 let xgbAvailable = false;
 
 (async () => {
   try {
-    const r = await fetch('http://127.0.0.1:5001/health', { signal: AbortSignal.timeout(3000) });
-    if (r.ok) { xgbAvailable = true; console.log('  XGBoost server: connected'); }
-  } catch { console.log('  XGBoost server: not running (predictions disabled)'); }
+    const r = await fetch(`${PREDICT_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    if (r.ok) { xgbAvailable = true; console.log(`  XGBoost server: connected (${PREDICT_BASE})`); }
+  } catch { console.log(`  XGBoost server: not reachable at ${PREDICT_BASE} (predictions disabled)`); }
 })();
 
 async function xgbPredict(featuresList) {
