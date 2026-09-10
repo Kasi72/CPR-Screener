@@ -1370,6 +1370,13 @@ tr.rec-row-expanded { background: rgba(139,92,246,0.04) !important; }
     <textarea id="customSymbols" rows="3"
       style="display:none; background:var(--bg2); border:1px solid var(--b2); border-radius:var(--rad-sm); color:var(--t2); font-size:11px; font-family:var(--mono); padding:6px; resize:vertical;"
       placeholder="RELIANCE,TCS,INFY (comma or newline separated)"></textarea>
+    <div id="csvUploadWrap" style="display:none; margin-top:6px;">
+      <label for="csvFileInput" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--accent);background:var(--bg2);border:1px solid var(--accent);border-radius:var(--rad-sm);padding:4px 10px;">
+        📂 Upload CSV
+      </label>
+      <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none">
+      <span id="csvFileName" style="font-size:10px;color:var(--t3);margin-left:6px;"></span>
+    </div>
   </div>
 
   <!-- CPR Strategy Selector -->
@@ -2864,9 +2871,30 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => App.setMode(btn.dataset.mode));
 });
 
+$('csvFileInput').addEventListener('change', function() {
+  const file = this.files[0];
+  if (!file) return;
+  $('csvFileName').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    // Extract symbols: first column of each row, skip header if non-numeric start
+    const lines = text.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+    const symbols = [];
+    for (const line of lines) {
+      const tok = line.split(',')[0].trim().toUpperCase().replace(/\.NS$/i, '');
+      if (tok && /^[A-Z0-9&-]+$/.test(tok) && isNaN(tok)) symbols.push(tok);
+    }
+    $('customSymbols').value = symbols.join(',');
+    $('csvFileName').textContent = `${file.name} (${symbols.length} symbols)`;
+  };
+  reader.readAsText(file);
+});
+
 $('symSelector').addEventListener('change', function() {
   const isCustom = this.value === '__custom__';
   $('customSymbols').style.display = isCustom ? '' : 'none';
+  $('csvUploadWrap').style.display  = isCustom ? '' : 'none';
   if (!isCustom) {
     const opt = this.options[this.selectedIndex];
     $('listMeta').textContent = opt.dataset.count ? `${opt.dataset.count} stocks in this index` : '';
@@ -2903,6 +2931,7 @@ async function initLists() {
   } catch(e) {
     $('symSelector').innerHTML = '<option value="__custom__">✏ Custom List…</option>';
     $('customSymbols').style.display = '';
+    $('csvUploadWrap').style.display  = '';
     console.error('Failed to load lists:', e);
   }
 }
