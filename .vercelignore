@@ -1,5 +1,7 @@
 node_modules
 scripts/
+kaggle_upload_tmp/
+kaggle/
 # Exclude large binary/training-only files from models/ but keep JSON inference files
 models/*.pkl
 models/*.pt
