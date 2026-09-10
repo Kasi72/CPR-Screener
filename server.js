@@ -596,7 +596,9 @@ function latestNiftyAndEma() {
 const RULE_SHARPE = {
   rule1: 2.86, rule2: 4.75, rule3: 0.44,  rule4: 0.0,
   rule5: 3.24, rule6: 0.0,  rule7: 6.19,  rule8: 2.44,
-  rule9: 4.45, rule10: 2.89, rule11: 5.27
+  rule9: 4.45, rule10: 2.89, rule11: 5.27,
+  // rule12-16: high-AUC setups; Sharpe TBD after Phase3 retrain (using rule11-level estimate)
+  rule12: 5.0, rule13: 5.0, rule14: 4.5, rule15: 5.5, rule16: 6.0,
 };
 // NOTE: R4 Sharpe=0.0 (neutral), R6 Sharpe=0.0 (was −1.61 OOS — enabled by user request, treat with caution)
 const CONFLUENCE_THRESHOLD = 4.5;  // raised 3.5→4.5: only high-quality rule combos
@@ -864,6 +866,10 @@ function getRuleDirection(rid, cpr, cam, currentClose, prevClose, periodHigh, pe
   if (rid === 'rule10') {
     return (cpr.upper > 0 && Math.abs(periodHigh - cpr.upper) / cpr.upper < 0.005) ? -1 : 1;
   }
+  // rule12: approaching TC from below = resistance (short), approaching BC from above = support (long)
+  if (rid === 'rule12') return currentClose > cpr.pivot ? -1 : 1;
+  // rule13/rule14: direction by price side of CPR boundary
+  if (rid === 'rule13' || rid === 'rule14') return currentClose > cpr.upper ? 1 : -1;
   return currentClose >= cpr.pivot ? 1 : -1;
 }
 
@@ -1015,7 +1021,13 @@ const RULES = {
       return (currentClose > vwap && currentClose < cpr.upper) ||
              (currentClose < vwap && currentClose > cpr.lower);
     }
-  }
+  },
+  // rule12-16: evaluated post-feature-computation and appended to matchedRules/rulesToPredict
+  rule12: { name: 'Virgin CPR Precision Test',    desc: 'First touch of 20-day-untested CPR near TC/BC with vol surge',         color: '#7c3aed', check() { return false; } },
+  rule13: { name: 'CPR Squeeze Breakout',         desc: '3+ consecutive narrow CPR days then decisive expansion + vol surge',    color: '#0891b2', check() { return false; } },
+  rule14: { name: 'Gap-Over-CPR Continuation',   desc: 'Clean gap beyond CPR boundary held all day + Ochoa trend yesterday',    color: '#ea580c', check() { return false; } },
+  rule15: { name: 'Weekly CPR Breakout',          desc: 'First close beyond weekly TC/BC Mon-Wed with vol surge + market RS',   color: '#16a34a', check() { return false; } },
+  rule16: { name: 'Multi-Factor Confluence',      desc: 'All 8 factors aligned: CPR + PCR + VIX + HMM + RS + delivery + mom + EMA200', color: '#dc2626', check() { return false; } },
 };
 
 function evaluateRules(ctx, activeRules) {
@@ -1663,6 +1675,67 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
             (curClose > w_TC && prevAboveWtc === 0) ||
             (curClose < w_BC && prevBelowWbc === 0)
           ) ? 1 : 0;
+        }
+      }
+
+      // rule12-16: high-AUC rules evaluated after Sprint 2B/4 features are ready
+      {
+        const _vol_rank   = (hVols[hVols.length - 1] || 0) / xVol20a;
+        const _ema200dist = ema200val > 0 ? (last.close - ema200val) / ema200val : 0;
+        const _deliv      = delivMap[symbol] ?? 0;
+        const _extraRules = [];
+
+        // rule12: Virgin CPR Precision Test — first touch of 20-day-untested CPR
+        if (cpr_virgin === 1) {
+          const nearTC = cpr.upper > 0 && (cpr.upper - last.close) / cpr.upper > 0 && (cpr.upper - last.close) / cpr.upper < 0.004;
+          const nearBC = cpr.lower > 0 && (last.close - cpr.lower) / cpr.lower > 0 && (last.close - cpr.lower) / cpr.lower < 0.004;
+          if ((nearTC || nearBC) && _vol_rank >= 0.85 && open_inside_cpr === 0 && prev_cpr_respected === 1) {
+            _extraRules.push('rule12');
+          }
+        }
+
+        // rule13: CPR Squeeze Breakout — 3+ narrow days, then decisive expansion
+        const _squeezeRelease = consecutive_narrow_cprs >= 3 && cpr_expansion_factor >= 1.4 && cpr_width_percentile_252d >= 0.50;
+        const _brokeUpper = last.close > cpr.upper && gap_pct > -0.005;
+        const _brokeLower = last.close < cpr.lower && gap_pct < 0.005;
+        if (_squeezeRelease && (_brokeUpper || _brokeLower) && _vol_rank >= 0.9 && vol_trend_slope > 0 && atr_expansion >= 1.15) {
+          _extraRules.push('rule13');
+        }
+
+        // rule14: Gap-Over-CPR Continuation — clean gap held all day + Ochoa trend yesterday
+        const _gapAbove   = last.open > cpr.upper * 1.002;
+        const _gapBelow   = last.open < cpr.lower * 0.998;
+        const _heldAbove  = _gapAbove && last.close > cpr.upper;
+        const _heldBelow  = _gapBelow && last.close < cpr.lower;
+        const _dirBull    = _gapAbove && prevClose > cpr.upper;
+        const _dirBear    = _gapBelow && prevClose < cpr.lower;
+        if ((_heldAbove || _heldBelow) && prev_day_ochoa_type === 0 && _vol_rank >= 0.80 && _vol_rank <= 3.5 && (_dirBull || _dirBear)) {
+          _extraRules.push('rule14');
+        }
+
+        // rule15: Weekly CPR Breakout — first break of weekly TC/BC, Mon-Wed only
+        const _dow = new Date(histBars[histBars.length - 1].time).getUTCDay();
+        const _monWed = _dow >= 1 && _dow <= 3;
+        if (weekly_cpr_first_break === 1 && _vol_rank >= 0.85 && market_rs_5d > 1.0 && _monWed) {
+          _extraRules.push('rule15');
+        }
+
+        // rule16: Multi-Factor Confluence — all 8 factors aligned bull or bear
+        const _bullConf = last.close > cpr.upper && niftyPCR < 0.85 && vixVal > 0 && vixVal < 16.0
+          && (hmm_regime_feat === 1 || hmm_regime_feat === 2) && market_rs_5d > 1.015
+          && _deliv >= 38.0 && xMom5 > 0.008 && _ema200dist > 0;
+        const _bearConf = last.close < cpr.lower && niftyPCR > 1.15 && vixVal > 17.0
+          && (hmm_regime_feat === 2 || hmm_regime_feat === 3) && market_rs_5d < 0.985
+          && _deliv < 25.0 && xMom5 < -0.008 && _ema200dist < -0.005;
+        if (_bullConf || _bearConf) {
+          _extraRules.push('rule16');
+        }
+
+        // Append extra rules (skip duplicates with already-fired rules)
+        for (const r of _extraRules) {
+          if (!matchedRules.includes(r)) matchedRules.push(r);
+          if (!qualityPassedRules.includes(r)) qualityPassedRules.push(r);
+          if (!rulesToPredict.includes(r)) rulesToPredict.push(r);
         }
       }
 
