@@ -63,8 +63,8 @@ def stacking_ensemble(
             meta_X = np.array([[xgb_prob, lgbm_prob, lstm_v, reg_h, soft_v, p2b_v, p2c_v]],
                                dtype=np.float32)
         else:
-            # Pre-Sprint-4 model (5 inputs) — backward compat
-            meta_X = np.array([[xgb_prob, lgbm_prob, lstm_v, reg_h, soft_v]], dtype=np.float32)
+            # Pre-Sprint-4 model (5 inputs): training order = [xgb, lgbm, regime, soft, p2c]
+            meta_X = np.array([[xgb_prob, lgbm_prob, reg_h, soft_v, p2c_v]], dtype=np.float32)
         return float(meta_lgbm.predict(meta_X)[0])
 
     sw = stacking_weights

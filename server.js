@@ -1630,6 +1630,42 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         cpr_zone_vol_ratio = totalVol > 0 ? cprVol / totalVol : 0;
       }
 
+      // Weekly CPR features — match build_dataset.py logic exactly
+      let weekly_price_above_wtc = 0;
+      let weekly_cpr_first_break = 0;
+      {
+        const lastBar = histBars[histBars.length - 1];
+        const nowMs = lastBar.time;
+        // Monday of current week (UTC)
+        const nowDate = new Date(nowMs);
+        const dow = nowDate.getUTCDay(); // 0=Sun..6=Sat
+        const daysFromMon = dow === 0 ? 6 : dow - 1;
+        const monDate = new Date(nowMs - daysFromMon * 86400000);
+        monDate.setUTCHours(0, 0, 0, 0);
+        const monTime = monDate.getTime();
+        // Prior week bars: [monTime-7d, monTime)
+        const priorStart = monTime - 7 * 86400000;
+        const priorBars = histBars.filter(b => b.time >= priorStart && b.time < monTime);
+        if (priorBars.length >= 1) {
+          const w_H = Math.max(...priorBars.map(b => b.high));
+          const w_L = Math.min(...priorBars.map(b => b.low));
+          const w_C = priorBars[priorBars.length - 1].close;
+          const w_P  = (w_H + w_L + w_C) / 3.0;
+          const w_TC = (w_H + w_L) / 2.0;   // pure midrange, NOT (Pivot+High)/2
+          const w_BC = 2.0 * w_P - w_TC;
+          const curClose = lastBar.close;
+          weekly_price_above_wtc = curClose > w_TC ? 1 : 0;
+          // Current week bars strictly before the current bar
+          const curWeekBars = histBars.filter(b => b.time >= monTime && b.time < nowMs);
+          const prevAboveWtc = curWeekBars.filter(b => b.close > w_TC).length;
+          const prevBelowWbc = curWeekBars.filter(b => b.close < w_BC).length;
+          weekly_cpr_first_break = (
+            (curClose > w_TC && prevAboveWtc === 0) ||
+            (curClose < w_BC && prevBelowWbc === 0)
+          ) ? 1 : 0;
+        }
+      }
+
       featureList = rulesToPredict.map(rid => {
         const direction  = getRuleDirection(rid, cpr, cam, last.close, prevClose, periodHigh, periodLow);
         const ruleNum    = parseInt(rid.replace('rule', ''));
@@ -1717,6 +1753,9 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
           deliv_pct: delivMap[symbol] ?? 0,
           // Nifty Put-Call Ratio (single value for all stocks)
           pcr: niftyPCR,
+          // Sprint 4 weekly CPR features (computed above per symbol)
+          weekly_cpr_first_break,
+          weekly_price_above_wtc,
         };
       });
 
