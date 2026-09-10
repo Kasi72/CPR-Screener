@@ -70,9 +70,22 @@ FEATURES = [
     'rsi_div', 'vol_accel_delta',
     # Tier 2D: context
     'days_since_52hi', 'expiry_dist',
-    # HMM regime quality
-    'regime_stability', 'transition_risk',
-]
+    # Sprint 1: CPR features
+    'cpr_overlap_pct', 'open_to_cpr_dist', 'prev_cpr_respected', 'cpr_zone_vol_ratio',
+    # HMM regime (integer state)
+    'hmm_regime',
+    # Sprint 2A: compression/structure CPR features
+    'open_inside_cpr', 'cpr_virgin', 'consecutive_narrow_cprs',
+    'cpr_midpoint_trend', 'cpr_expansion_factor',
+    # Sprint 2B: structural + context CPR features
+    'cpr_above_prev_cpr', 'prev_close_inside_cpr', 'atr_to_cpr_ratio',
+    'cpr_width_percentile_252d', 'prev_day_ochoa_type',
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct', 'cpr_test_count_5d', 'prev_bar_close_pos',
+    'atr_expansion', 'vol_trend_slope',
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break', 'weekly_price_above_wtc',
+]  # 58 features — matches lgbm_model.txt / xgb_phase2.json training
 
 # ─── Model Registry ───────────────────────────────────────────────────────────
 models = {}
@@ -86,7 +99,7 @@ def load_models():
     # XGBoost (always required)
     print("Loading XGBoost…")
     xgb_p = XGB_PATH if os.path.exists(XGB_PATH) else XGB_FALLBACK
-    xgb_m = xgb.XGBRegressor()
+    xgb_m = xgb.XGBClassifier()
     xgb_m.load_model(xgb_p)
     m['xgb'] = xgb_m
     print(f"  XGBoost ready ({os.path.basename(xgb_p)}).")
@@ -277,9 +290,34 @@ _FEATURE_DEFAULTS = {
     # Tier 2D: context
     'days_since_52hi': 90.0,
     'expiry_dist':   15.0,
-    # HMM regime quality
-    'regime_stability': 0.0,
-    'transition_risk':  0.25,
+    # Sprint 1: CPR features
+    'cpr_overlap_pct':           0.5,
+    'open_to_cpr_dist':          0.0,
+    'prev_cpr_respected':        0.0,
+    'cpr_zone_vol_ratio':        1.0,
+    # HMM regime (integer state)
+    'hmm_regime':               -1,
+    # Sprint 2A: compression/structure CPR features
+    'open_inside_cpr':           0.0,
+    'cpr_virgin':                0.0,
+    'consecutive_narrow_cprs':   0.0,
+    'cpr_midpoint_trend':        0.0,
+    'cpr_expansion_factor':      1.0,
+    # Sprint 2B: structural + context CPR features
+    'cpr_above_prev_cpr':        0.0,
+    'prev_close_inside_cpr':     0.0,
+    'atr_to_cpr_ratio':          1.0,
+    'cpr_width_percentile_252d': 0.5,
+    'prev_day_ochoa_type':       0.0,
+    # Sprint 3: gap + bar quality + volatility + volume structure
+    'gap_pct':                   0.0,
+    'cpr_test_count_5d':         0.0,
+    'prev_bar_close_pos':        0.5,
+    'atr_expansion':             1.0,
+    'vol_trend_slope':           0.0,
+    # Sprint 4: weekly CPR features
+    'weekly_cpr_first_break':    0.0,
+    'weekly_price_above_wtc':    0.0,
 }
 
 
