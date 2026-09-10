@@ -1689,10 +1689,15 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         const _deliv      = delivMap[symbol] ?? 0;
         const _extraRules = [];
 
-        // rule12: Virgin CPR Precision Test — first touch of 20-day-untested CPR
+        // rule12: Virgin CPR Precision Test — price approaching untested CPR from outside
+        // cpr_virgin=1 means price is OUTSIDE CPR today, so nearTC/nearBC must check from outside:
+        //   aboveCPR: low is within 0.4% above TC (approaching TC from above)
+        //   belowCPR: high is within 0.4% below BC (approaching BC from below)
         if (cpr_virgin === 1) {
-          const nearTC = cpr.upper > 0 && (cpr.upper - last.close) / cpr.upper > 0 && (cpr.upper - last.close) / cpr.upper < 0.004;
-          const nearBC = cpr.lower > 0 && (last.close - cpr.lower) / cpr.lower > 0 && (last.close - cpr.lower) / cpr.lower < 0.004;
+          const _aboveCPR = last.low > cpr.upper;
+          const _belowCPR = last.high < cpr.lower;
+          const nearTC = _aboveCPR && cpr.upper > 0 && (last.low - cpr.upper) / cpr.upper < 0.004;
+          const nearBC = _belowCPR && cpr.lower > 0 && (cpr.lower - last.high) / cpr.lower < 0.004;
           if ((nearTC || nearBC) && _vol_rank >= 0.85 && open_inside_cpr === 0 && prev_cpr_respected === 1) {
             _extraRules.push('rule12');
           }

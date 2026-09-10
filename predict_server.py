@@ -504,7 +504,11 @@ def _ppo(features_row, regime_score: float = 0.5):
 def predict():
     try:
         X = extract_features(request.json)
-        preds = models['xgb'].predict(X).tolist()
+        xgb_m = models['xgb']
+        if hasattr(xgb_m, 'predict_proba'):
+            preds = xgb_m.predict_proba(X)[:, 1].tolist()
+        else:
+            preds = xgb_m.predict(X).tolist()
         return jsonify({'predictions': preds})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
