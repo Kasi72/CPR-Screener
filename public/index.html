@@ -2947,16 +2947,16 @@ const GATES = [
   { id:'niftyEma',  icon:'📈',  harmful:false, label:'Nifty > 50 EMA',   sub:'directional master filter' },
   { id:'ema200',    icon:'〰',  harmful:true,  label:'EMA 200 Filter',   sub:'anti-predictive for CPR (d=−0.096) — keep OFF' },
   { id:'adx',       icon:'⚡',  harmful:false, label:'ADX Strength',     sub:'> 25 — skip choppy markets' },
-  { id:'atrPct',    icon:'🎯',  harmful:false, label:'ATR Mid-Vol',      sub:'data: [0.56–0.99] rank optimal' },
-  { id:'volSurge',  icon:'📊',  harmful:false, label:'Volume Surge',     sub:'data: ≥0.937× 20-bar avg optimal' },
+  { id:'atrPct',    icon:'🎯',  harmful:false, label:'ATR Mid-Vol',      sub:'Bull [0.17–0.57] · Bear/Chop [0.54–1.0] rank' },
+  { id:'volSurge',  icon:'📊',  harmful:false, label:'Volume Surge',     sub:'Bull ≥0.818 · Bear ≥0.899 · Chop ≥0.783×' },
   { id:'kalman',    icon:'🌊',  harmful:false, label:'Kalman Trend',     sub:'velocity direction check' },
   { id:'sgTrend',   icon:'📉',  harmful:true,  label:'S-G Trend',        sub:'anti-predictive for CPR (d=−0.120) — keep OFF' },
   { id:'rsiDiv',    icon:'🔄',  harmful:false, label:'RSI Divergence',   sub:'blocks breakouts on diverge' },
   { id:'poc',       icon:'◎',   harmful:false, label:'Volume POC Gate',  sub:'|POC − CPR pivot| < 0.8%' },
-  { id:'rsiEntry',  icon:'📐',  harmful:false, label:'RSI Entry Zone',   sub:'data: longs 40–75 / shorts 21–44 optimal' },
+  { id:'rsiEntry',  icon:'📐',  harmful:false, label:'RSI Entry Zone',   sub:'data: longs 70–100 (momentum) / shorts 0–43' },
   { id:'candleConf',icon:'🕯',  harmful:false, label:'Candle Confirm',   sub:'last bar body agrees direction' },
   { id:'volTrend',  icon:'⬆',   harmful:false, label:'Vol Trend',        sub:'3-bar avg ≥ 90% of 10-bar avg' },
-  { id:'lgbm2c',    icon:'🤖',  harmful:false, label:'LGBM2c ML Score',  sub:'≥0.55 Bull/Bear, ≥0.65 Chop — ML quality gate' },
+  { id:'lgbm2c',    icon:'🤖',  harmful:false, label:'LGBM2c ML Score',  sub:'Bull ≥0.305 · Bear ≥0.301 · Chop ≥0.299 (+6.9%)' },
 ];
 
 function initGates() {

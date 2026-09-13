@@ -606,13 +606,15 @@ const BREAKOUT_RULES       = new Set(['rule3', 'rule8']);
 const MEAN_REVERSION_RULES = new Set(['rule9', 'rule10']);  // skip directional gates
 
 // Regime-adaptive gate thresholds (Priority 6)
-// atrPct/volRatio thresholds from 1.26M-signal statistical optimization (2026-09-13)
-// atrPct [0.56,0.99] and volRatio 0.937 are data-backed optimal across all regimes
+// Per-regime gate thresholds from 1.26M-signal Youden-J optimization (2026-09-13)
+// Bull ATR [0.17,0.57]: low-vol trending stocks work best in bull regime
+// Bear/Chop ATR upper bound 1.0: high ATR acceptable in volatile regimes
+// VIX: Bear requires calm (<13.8), Chop moderate (<14.8), Bull permissive (<20.4)
 const REGIME_GATES = {
-  'Bull-Trend':     { adx: 22, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 28 },
-  'Bear-Trend':     { adx: 25, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 22 },
-  'Chop':           { adx: 28, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 20 },
-  'High-Vol-Panic': { adx: 30, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 16 },
+  'Bull-Trend':     { adx: 22, atrPct: [0.174, 0.567], volRatio: 0.818,  vix: 20.4 },
+  'Bear-Trend':     { adx: 25, atrPct: [0.859, 1.000], volRatio: 0.899,  vix: 13.8 },
+  'Chop':           { adx: 28, atrPct: [0.538, 1.000], volRatio: 0.783,  vix: 14.8 },
+  'High-Vol-Panic': { adx: 30, atrPct: [0.560, 0.990], volRatio: 1.200,  vix: 16.0 },
 };
 
 // Hold-duration calibrated MFE/MAE params — grid-searched 2026-09-06
@@ -1337,10 +1339,12 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       // ④ POC — informational only; badge shows alignment, toggle enforces it
       const gatePOC = dg.has('poc') ? true : pocAligned;
 
-      // ⑤ RSI at-entry filter — data-optimized: longs 40-75, shorts 21.4-44.2 (1.26M-signal analysis)
+      // ⑤ RSI at-entry filter — data-optimized (1.26M-signal Youden-J, 2026-09-13)
+      // Longs [70,100]: CPR breakout momentum; Shorts [0,43]: oversold entries only
+      // isMeanRev rules SKIP this gate (they use RSI differently)
       const gateRSIEntry = (isMeanRev || dg.has('rsiEntry'))
         ? true
-        : (direction === 1 ? rsiCur >= 40 && rsiCur <= 75 : rsiCur >= 21.4 && rsiCur <= 44.2);
+        : (direction === 1 ? rsiCur >= 70 && rsiCur <= 100 : rsiCur >= 0 && rsiCur <= 43);
 
       // ⑥ Last candle body confirms direction
       const gateCandle = dg.has('candleConf')
@@ -1897,11 +1901,14 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5, mlDirection: fallbackDir };
     }
 
-    // LGBM2c ML score gate — applied post-ML; regime-adaptive thresholds from statistical analysis
+    // LGBM2c ML score gate — data-optimal thresholds from 1.26M-signal analysis (2026-09-13)
+    // lgbm2c_score range: 0.231–0.475; regime thresholds ~0.299–0.305
+    // High-Vol-Panic always rejects (mlResult.regimeAllowed handles that separately)
     if (!dg.has('lgbm2c') && mlResult && mlResult.lgbmScore != null) {
-      const lgbmThresh = currentRegimeForGates === 'Chop' ? 0.65 : 0.55;
-      if (mlResult.lgbmScore < lgbmThresh) {
-        qualityPassedRules.splice(0);  // reject signal; score too low for this regime
+      const lgbmThresh = { 'Bull-Trend': 0.305, 'Bear-Trend': 0.301, 'Chop': 0.299, 'High-Vol-Panic': 999 };
+      const thr = lgbmThresh[currentRegimeForGates] ?? 0.301;
+      if (mlResult.lgbmScore < thr) {
+        qualityPassedRules.splice(0);
       }
     }
 
