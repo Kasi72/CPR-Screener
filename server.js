@@ -1888,6 +1888,7 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         stackScore:   ensRes ? ensRes.stackScore : null,
         xgbScore:     ensRes ? ensRes.xgbScore   : null,
         lgbmScore:    ensRes ? ensRes.lgbmScore   : null,
+        lgbm2bScore:  ensRes ? ensRes.lgbm2bScore  : null,
         confLower:    confInt.lower,
         confUpper:    confInt.upper,
         positionSize: posSize,
@@ -1901,13 +1902,14 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5, mlDirection: fallbackDir };
     }
 
-    // LGBM2c ML score gate — data-optimal thresholds from 1.26M-signal analysis (2026-09-13)
-    // lgbm2c_score range: 0.231–0.475; regime thresholds ~0.299–0.305
+    // LGBM2b ML score gate — 2× more discriminative than LGBM2c (J=0.1511 vs 0.0833, +13.79% ΔWin)
+    // 58 features (56 base + weekly_cpr_first_break + weekly_price_above_wtc)
+    // Score range 0–1; Youden-J optimal global threshold ~0.302
     // High-Vol-Panic always rejects (mlResult.regimeAllowed handles that separately)
-    if (!dg.has('lgbm2c') && mlResult && mlResult.lgbmScore != null) {
-      const lgbmThresh = { 'Bull-Trend': 0.305, 'Bear-Trend': 0.301, 'Chop': 0.299, 'High-Vol-Panic': 999 };
-      const thr = lgbmThresh[currentRegimeForGates] ?? 0.301;
-      if (mlResult.lgbmScore < thr) {
+    if (!dg.has('lgbm2c') && mlResult && mlResult.lgbm2bScore != null) {
+      const lgbm2bThresh = { 'Bull-Trend': 0.302, 'Bear-Trend': 0.302, 'Chop': 0.302, 'High-Vol-Panic': 999 };
+      const thr = lgbm2bThresh[currentRegimeForGates] ?? 0.302;
+      if (mlResult.lgbm2bScore < thr) {
         qualityPassedRules.splice(0);
       }
     }

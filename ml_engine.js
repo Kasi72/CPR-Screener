@@ -15,10 +15,11 @@ const path = require('path');
 const { loadModel, predictOne } = require('./lib/lgbmInfer');
 const { ppoPredict }             = require('./lib/ppoInfer');
 
-const MODELS_DIR        = path.join(__dirname, 'models');
-const LGBM_GLOBAL_PATH  = path.join(MODELS_DIR, 'lgbm2c_global_js.json');
-const LGBM_REGIME_PATHS = [0, 1, 2, 3].map(i => path.join(MODELS_DIR, `lgbm2c_regime_${i}_js.json`));
-const PPO_WEIGHTS_PATH  = path.join(MODELS_DIR, 'ppo_policy_weights.json');
+const MODELS_DIR         = path.join(__dirname, 'models');
+const LGBM_GLOBAL_PATH   = path.join(MODELS_DIR, 'lgbm2c_global_js.json');
+const LGBM_REGIME_PATHS  = [0, 1, 2, 3].map(i => path.join(MODELS_DIR, `lgbm2c_regime_${i}_js.json`));
+const LGBM2B_GLOBAL_PATH = path.join(MODELS_DIR, 'lgbm2b_global_js.json');
+const PPO_WEIGHTS_PATH   = path.join(MODELS_DIR, 'ppo_policy_weights.json');
 
 // ─── Feature schema (must match _P2C_ALL_FEATURES in predict_server.py) ──────
 const _P2C_BASE_FEATURES = [
@@ -99,6 +100,27 @@ function buildFeatureVector(f) {
   return vec;
 }
 
+/**
+ * Build 58-element feature vector for LGBM2b.
+ * 56 base features + weekly_cpr_first_break + weekly_price_above_wtc (no interactions).
+ */
+function buildLGBM2bVector(f) {
+  const dir = f.direction ?? 1;
+
+  function get(name) {
+    const raw = (f[name] !== undefined && f[name] !== null && isFinite(f[name])) ? f[name]
+              : (_P2C_DEFAULTS[name] !== undefined ? _P2C_DEFAULTS[name] : 0);
+    const val = _P2C_DIRECTIONAL.has(name) ? raw * dir : raw;
+    return isFinite(val) ? val : 0;
+  }
+
+  const vec = new Float32Array(58);
+  for (let i = 0; i < 56; i++) vec[i] = get(_P2C_BASE_FEATURES[i]);
+  vec[56] = (f.weekly_cpr_first_break !== undefined && isFinite(f.weekly_cpr_first_break)) ? f.weekly_cpr_first_break : 0;
+  vec[57] = (f.weekly_price_above_wtc !== undefined && isFinite(f.weekly_price_above_wtc)) ? f.weekly_price_above_wtc : 0;
+  return vec;
+}
+
 // ─── State cache ──────────────────────────────────────────────────────────────
 let _hmmParams          = null;
 let _conformalScores    = null;
@@ -106,6 +128,7 @@ let _gateWeights        = null;
 let _currentRegime      = null;
 let _currentRegimeState = -1;   // HMM state integer (0=Panic,1=Bear,2=Chop,3=Bull)
 let _lgbmGlobal         = null;
+let _lgbm2bGlobal       = null;
 
 // ─── JSON loader helper ───────────────────────────────────────────────────────
 function loadJson(filename) {
@@ -140,6 +163,18 @@ function init() {
     }
   } else {
     console.log('[ml_engine] WARN: lgbm2c_global_js.json not found — ML scoring disabled');
+  }
+
+  // Eagerly load LGBM2b (58 features: 56 base + 2 weekly CPR; 2× more discriminative than LGBM2c)
+  if (fs.existsSync(LGBM2B_GLOBAL_PATH)) {
+    try {
+      _lgbm2bGlobal = loadModel(LGBM2B_GLOBAL_PATH);
+      console.log(`[ml_engine] LGBM2b global loaded (${_lgbm2bGlobal.num_trees} trees).`);
+    } catch (e) {
+      console.error('[ml_engine] Failed to load lgbm2b_global_js.json:', e.message);
+    }
+  } else {
+    console.log('[ml_engine] WARN: lgbm2b_global_js.json not found — LGBM2b scoring disabled');
   }
 }
 
@@ -298,14 +333,24 @@ async function getEnsembleScore(features) {
   if (!isFinite(stackScore)) return null; // model produced garbage — skip
   const ci = getConfidenceInterval(stackScore);
 
+  // LGBM2b score (58-feature model, 2× more discriminative)
+  let lgbm2bScore = null;
+  if (_lgbm2bGlobal) {
+    try {
+      const vec2b = buildLGBM2bVector(features);
+      lgbm2bScore = predictOne(_lgbm2bGlobal, vec2b);
+    } catch { lgbm2bScore = null; }
+  }
+
   return {
     stackScore,
-    xgbScore:   null,
-    lgbmScore:  globalScore,
+    xgbScore:    null,
+    lgbmScore:   globalScore,
+    lgbm2bScore,
     regimeScore,
-    softScore:  null,
-    confLower:  ci.lower,
-    confUpper:  ci.upper,
+    softScore:   null,
+    confLower:   ci.lower,
+    confUpper:   ci.upper,
   };
 }
 

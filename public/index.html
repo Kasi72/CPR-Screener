@@ -1680,7 +1680,7 @@ function computeRecommendation(stock) {
   // ── Priority 1: lgbm2c_score as primary confidence (replaces AUC-0.572 logistic weights) ──
   const stackScore   = (ml.stackScore != null && isFinite(ml.stackScore)) ? ml.stackScore : 0.5;
   const conf         = Math.round(stackScore * 100);   // 0–100
-  const why          = [`LGBM2c score ${(stackScore*100).toFixed(1)}% → conf ${conf}`];
+  const why          = [`LGBM2b score ${(stackScore*100).toFixed(1)}% → conf ${conf}`];
 
   // ── Priority 2: regime-graded multiplier (not binary gate) ───────────────
   const regime       = ml.regime || '';
@@ -2812,7 +2812,7 @@ const App = {
       'PositionSize','Regime','RegimeMult',
       'ConfluenceScore','ConfluencePass',
       'QualityRules','PrimaryRule','BestXGB%',
-      'LGBM2cScore',
+      'LGBM2bScore',
       'ADX','ATR%','VolRatio','VIX',
       'TC','Pivot','BC','WidthPct',
       'CamR3','CamS3','VWAP','Position',
@@ -2830,7 +2830,7 @@ const App = {
         s.confluenceScore, s.confluencePass ? 1 : 0,
         (s.qualityPassedRules || []).join('|'), s.primaryRule || '',
         s.bestPred != null ? s.bestPred.toFixed(2) : '',
-        ml.stackScore != null ? (ml.stackScore * 100).toFixed(1) : '',
+        ml.lgbm2bScore != null ? (ml.lgbm2bScore * 100).toFixed(1) : '',
         gg.adx     ? gg.adx.value     : '',
         gg.atrPct  ? gg.atrPct.value  : '',
         gg.volSurge? gg.volSurge.value: '',
@@ -2956,7 +2956,7 @@ const GATES = [
   { id:'rsiEntry',  icon:'📐',  harmful:false, label:'RSI Entry Zone',   sub:'data: longs 70–100 (momentum) / shorts 0–43' },
   { id:'candleConf',icon:'🕯',  harmful:false, label:'Candle Confirm',   sub:'last bar body agrees direction' },
   { id:'volTrend',  icon:'⬆',   harmful:false, label:'Vol Trend',        sub:'3-bar avg ≥ 90% of 10-bar avg' },
-  { id:'lgbm2c',    icon:'🤖',  harmful:false, label:'LGBM2c ML Score',  sub:'Bull ≥0.305 · Bear ≥0.301 · Chop ≥0.299 (+6.9%)' },
+  { id:'lgbm2c',    icon:'🤖',  harmful:false, label:'LGBM2b ML Score',  sub:'≥0.302 all regimes · J=0.151 · +13.8% ΔWin (2× LGBM2c)' },
 ];
 
 function initGates() {
