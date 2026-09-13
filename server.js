@@ -606,11 +606,13 @@ const BREAKOUT_RULES       = new Set(['rule3', 'rule8']);
 const MEAN_REVERSION_RULES = new Set(['rule9', 'rule10']);  // skip directional gates
 
 // Regime-adaptive gate thresholds (Priority 6)
+// atrPct/volRatio thresholds from 1.26M-signal statistical optimization (2026-09-13)
+// atrPct [0.56,0.99] and volRatio 0.937 are data-backed optimal across all regimes
 const REGIME_GATES = {
-  'Bull-Trend':     { adx: 22, atrPct: [0.35, 0.75], volRatio: 0.85, vix: 28 },
-  'Bear-Trend':     { adx: 25, atrPct: [0.45, 0.80], volRatio: 1.00, vix: 22 },
-  'Chop':           { adx: 28, atrPct: [0.55, 0.85], volRatio: 1.15, vix: 20 },
-  'High-Vol-Panic': { adx: 30, atrPct: [0.70, 1.20], volRatio: 1.40, vix: 16 },
+  'Bull-Trend':     { adx: 22, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 28 },
+  'Bear-Trend':     { adx: 25, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 22 },
+  'Chop':           { adx: 28, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 20 },
+  'High-Vol-Panic': { adx: 30, atrPct: [0.56, 0.99], volRatio: 0.937, vix: 16 },
 };
 
 // Hold-duration calibrated MFE/MAE params — grid-searched 2026-09-06
@@ -1335,10 +1337,10 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
       // ④ POC — informational only; badge shows alignment, toggle enforces it
       const gatePOC = dg.has('poc') ? true : pocAligned;
 
-      // ⑤ RSI at-entry filter: longs want RSI 40-75, shorts want 25-60; skip for mean-rev
+      // ⑤ RSI at-entry filter — data-optimized: longs 40-75, shorts 21.4-44.2 (1.26M-signal analysis)
       const gateRSIEntry = (isMeanRev || dg.has('rsiEntry'))
         ? true
-        : (direction === 1 ? rsiCur >= 40 && rsiCur <= 75 : rsiCur >= 25 && rsiCur <= 60);
+        : (direction === 1 ? rsiCur >= 40 && rsiCur <= 75 : rsiCur >= 21.4 && rsiCur <= 44.2);
 
       // ⑥ Last candle body confirms direction
       const gateCandle = dg.has('candleConf')
@@ -1893,6 +1895,14 @@ async function processSymbol(symbol, timeframe, activeRules, opts = {}) {
         ? getRuleDirection(matchedRules[0], cpr, cam, last.close, prevClose, periodHigh, periodLow)
         : 0;
       mlResult = { regime: currentRegime, regimeScore, regimeAllowed, positionSize: 0.5, mlDirection: fallbackDir };
+    }
+
+    // LGBM2c ML score gate — applied post-ML; regime-adaptive thresholds from statistical analysis
+    if (!dg.has('lgbm2c') && mlResult && mlResult.lgbmScore != null) {
+      const lgbmThresh = currentRegimeForGates === 'Chop' ? 0.65 : 0.55;
+      if (mlResult.lgbmScore < lgbmThresh) {
+        qualityPassedRules.splice(0);  // reject signal; score too low for this regime
+      }
     }
 
     // ── Post-mlResult: confluence + ML-adaptive exit levels + best-rule (P1,P2,P3,P4) ──────

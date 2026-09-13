@@ -555,6 +555,9 @@ aside {
 .gate-row:hover { background: var(--glass2); border-color: var(--b1); }
 .gate-row.gate-on { border-color: rgba(16,185,129,0.18); background: rgba(16,185,129,0.04); }
 .gate-row.gate-on:hover { background: rgba(16,185,129,0.08); }
+.gate-dot { font-size: 8px; margin-right: 5px; vertical-align: middle; }
+.gate-dot-good { color: #22c55e; }
+.gate-dot-bad  { color: #ef4444; }
 
 .gate-icon {
   font-size: 13px;
@@ -1541,7 +1544,7 @@ const State = {
   activeRules: new Set(['rule1','rule2','rule3','rule4','rule5','rule6','rule7','rule8','rule9','rule10','rule11','rule12','rule13','rule14','rule15','rule16']),
   narrowThreshold: 0.5,
   holdMode: 'swing',
-  disabledGates: new Set(),
+  disabledGates: new Set(['ema200', 'sgTrend']),
   results: [],
   displayResults: [],
   ruleFilter: 'all',
@@ -2937,35 +2940,43 @@ async function initLists() {
 }
 
 // ─── QUALITY GATES ────────────────────────────────────────────────────────────
+// harmful:true = statistically hurts performance (Cohen d < 0, default OFF)
+// harmful:false = statistically neutral/helpful (default ON)
 const GATES = [
-  { id:'vix',       icon:'🛡',  label:'India VIX',        sub:'< 18 — panic regime filter' },
-  { id:'niftyEma',  icon:'📈',  label:'Nifty > 50 EMA',   sub:'directional master filter' },
-  { id:'ema200',    icon:'〰',  label:'EMA 200 Filter',   sub:'price on correct side of trend' },
-  { id:'adx',       icon:'⚡',  label:'ADX Strength',     sub:'> 25 — skip choppy markets' },
-  { id:'atrPct',    icon:'🎯',  label:'ATR Mid-Vol',      sub:'40–70th pct — prime vol zone' },
-  { id:'volSurge',  icon:'📊',  label:'Volume Surge',     sub:'≥ 1.0× 20-bar average' },
-  { id:'kalman',    icon:'🌊',  label:'Kalman Trend',     sub:'velocity direction check' },
-  { id:'sgTrend',   icon:'📉',  label:'S-G Trend',        sub:'Savitzky-Golay slope' },
-  { id:'rsiDiv',    icon:'🔄',  label:'RSI Divergence',   sub:'blocks breakouts on diverge' },
-  { id:'poc',       icon:'◎',   label:'Volume POC Gate',  sub:'|POC − CPR pivot| < 0.8%' },
-  { id:'rsiEntry',  icon:'📐',  label:'RSI Entry Zone',   sub:'40–75 longs / 25–60 shorts' },
-  { id:'candleConf',icon:'🕯',  label:'Candle Confirm',   sub:'last bar body agrees direction' },
-  { id:'volTrend',  icon:'⬆',   label:'Vol Trend',        sub:'3-bar avg ≥ 90% of 10-bar avg' },
+  { id:'vix',       icon:'🛡',  harmful:false, label:'India VIX',        sub:'< 18 — panic regime filter' },
+  { id:'niftyEma',  icon:'📈',  harmful:false, label:'Nifty > 50 EMA',   sub:'directional master filter' },
+  { id:'ema200',    icon:'〰',  harmful:true,  label:'EMA 200 Filter',   sub:'anti-predictive for CPR (d=−0.096) — keep OFF' },
+  { id:'adx',       icon:'⚡',  harmful:false, label:'ADX Strength',     sub:'> 25 — skip choppy markets' },
+  { id:'atrPct',    icon:'🎯',  harmful:false, label:'ATR Mid-Vol',      sub:'data: [0.56–0.99] rank optimal' },
+  { id:'volSurge',  icon:'📊',  harmful:false, label:'Volume Surge',     sub:'data: ≥0.937× 20-bar avg optimal' },
+  { id:'kalman',    icon:'🌊',  harmful:false, label:'Kalman Trend',     sub:'velocity direction check' },
+  { id:'sgTrend',   icon:'📉',  harmful:true,  label:'S-G Trend',        sub:'anti-predictive for CPR (d=−0.120) — keep OFF' },
+  { id:'rsiDiv',    icon:'🔄',  harmful:false, label:'RSI Divergence',   sub:'blocks breakouts on diverge' },
+  { id:'poc',       icon:'◎',   harmful:false, label:'Volume POC Gate',  sub:'|POC − CPR pivot| < 0.8%' },
+  { id:'rsiEntry',  icon:'📐',  harmful:false, label:'RSI Entry Zone',   sub:'data: longs 40–75 / shorts 21–44 optimal' },
+  { id:'candleConf',icon:'🕯',  harmful:false, label:'Candle Confirm',   sub:'last bar body agrees direction' },
+  { id:'volTrend',  icon:'⬆',   harmful:false, label:'Vol Trend',        sub:'3-bar avg ≥ 90% of 10-bar avg' },
+  { id:'lgbm2c',    icon:'🤖',  harmful:false, label:'LGBM2c ML Score',  sub:'≥0.55 Bull/Bear, ≥0.65 Chop — ML quality gate' },
 ];
 
 function initGates() {
   const list = $('gatesList');
   if (!list) return;
-  list.innerHTML = GATES.map(g => `
-    <div class="gate-row gate-on" data-gate="${g.id}" onclick="toggleGate('${g.id}')">
+  list.innerHTML = GATES.map(g => {
+    const dot = g.harmful === true  ? '<span class="gate-dot gate-dot-bad">●</span>'
+              : g.harmful === false ? '<span class="gate-dot gate-dot-good">●</span>'
+              : '';
+    const on = !State.disabledGates.has(g.id);
+    return `
+    <div class="gate-row${on ? ' gate-on' : ''}" data-gate="${g.id}" onclick="toggleGate('${g.id}')">
       <span class="gate-icon">${g.icon}</span>
       <div class="gate-text">
-        <div class="gate-label">${g.label}</div>
+        <div class="gate-label">${dot}${g.label}</div>
         <div class="gate-sub">${g.sub}</div>
       </div>
       <div class="gate-pill"></div>
     </div>
-  `).join('');
+  `}).join('');
 
   $('gatesAllOn').onclick  = () => { State.disabledGates.clear(); refreshGateUI(); };
   $('gatesAllOff').onclick = () => { GATES.forEach(g => State.disabledGates.add(g.id)); refreshGateUI(); };
